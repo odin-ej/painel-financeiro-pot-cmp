@@ -94,12 +94,22 @@
     return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   }
 
-  /** "agosto/2026" -> "2026-08" (ou null). */
-  function monthKey(s) {
-    const m = norm(s).match(/^([a-z]+)\/(\d{4})$/);
-    if (!m) return null;
-    const i = MESES.indexOf(m[1]);
-    return i < 0 ? null : `${m[2]}-${String(i + 1).padStart(2, '0')}`;
+  /**
+   * Converte o cabeçalho de mês em "AAAA-MM" (ou null).
+   * Aceita "agosto/2026" e também "Ago"/"Agosto" sem ano — nesse caso usa `year`.
+   * @param {string} s
+   * @param {number} [year] - ano do bloco, para cabeçalhos sem ano
+   */
+  function monthKey(s, year) {
+    const t = norm(s);
+    const m = t.match(/^([a-z]+)\/(\d{4})$/);
+    if (m) {
+      const i = MESES.indexOf(m[1]);
+      return i < 0 ? null : `${m[2]}-${String(i + 1).padStart(2, '0')}`;
+    }
+    if (!year) return null;
+    const i = MESES.findIndex((x) => x === t || x.slice(0, 3) === t);
+    return i < 0 ? null : `${year}-${String(i + 1).padStart(2, '0')}`;
   }
 
   /* ------------------------------------------------------------------ */
@@ -237,7 +247,7 @@
    *
    * Padrão de cada bloco na planilha:
    *   linha título  → nome do indicador + "Meta" / "Progresso"
-   *   linha meses   → janeiro/AAAA … dezembro/AAAA + "Total"
+   *   linha meses   → janeiro/AAAA … dezembro/AAAA ou Jan … Dez (+ "Total")
    *   linhas dados  → rótulo + um valor por mês (+ total, meta, progresso)
    * O parser só depende desse padrão, não de posições fixas.
    *
@@ -249,7 +259,8 @@
     const rows = parseCSV(text);
     let start = rows.findIndex((r) => r.some((c) => norm(c).includes(norm(marcador))));
     if (start < 0) start = 0;
-    const isMonthRow = (r) => r.filter((c) => monthKey(c)).length >= 3;
+    // Ano fictício só para detectar cabeçalhos sem ano ("Jan", "Fev"…)
+    const isMonthRow = (r) => r.filter((c) => monthKey(c, 2000)).length >= 3;
     const nonEmpty = (r) => r.some((c) => c.trim());
     const blocks = [];
     const entradas = {};
@@ -261,7 +272,10 @@
       while (t > start && !nonEmpty(rows[t])) t--;
       const trow = rows[t] || [];
       const months = [];
-      mrow.forEach((c, col) => { const k = monthKey(c); if (k) months.push({ col, ym: k }); });
+      // Cabeçalho sem ano: usa o ano escrito na linha do título (ex.: "2026") ou o ano corrente
+      const yearCell = trow.map((c) => c.trim()).find((c) => /^20\d\d$/.test(c));
+      const year = yearCell ? Number(yearCell) : new Date().getFullYear();
+      mrow.forEach((c, col) => { const k = monthKey(c, year); if (k) months.push({ col, ym: k }); });
       const firstCol = months[0].col;
       const totalCol = mrow.findIndex((c) => norm(c) === 'total');
       const metaCol = trow.findIndex((c) => norm(c) === 'meta');
@@ -272,7 +286,6 @@
       let note = '';
       const paren = rawTitle.match(/\(([^)]*)\)\s*$/);
       if (paren) { note = paren[1]; rawTitle = rawTitle.replace(/\s*\([^)]*\)\s*$/, ''); }
-      if (rawTitle && rawTitle.length <= 2 && blocks.length) rawTitle = `${blocks[blocks.length - 1].title} (%)`;
 
       const data = [];
       for (let j = i + 1; j < rows.length; j++) {
@@ -294,6 +307,8 @@
         // "R$ -" em meses futuros significa "ainda não registrado", não entrada zero
         if (/^entradas totais/.test(norm(label))) months.forEach((m, k) => { if (values[k]) entradas[m.ym] = values[k]; });
       }
+      // Bloco intitulado só "%": nomeia pela razão que ele calcula (ex.: Reinvestimento em membros (% de saídas))
+      if (rawTitle.length <= 2 && data.length >= 2) rawTitle = `${data[1].label} (% de ${data[0].label.toLowerCase()})`;
       // Bloco sem título na planilha: nomeia pelos próprios indicadores
       if (!rawTitle && data.length) rawTitle = data.slice(0, 3).map((d) => d.label).join(' · ');
       if (data.length) blocks.push({ id: slug(rawTitle) + '-' + blocks.length, title: rawTitle, note, months: months.map((m) => m.ym), rows: data, sheetRow: t + 1 });

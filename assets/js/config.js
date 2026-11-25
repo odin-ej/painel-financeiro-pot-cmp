@@ -18,12 +18,12 @@ window.PAINEL_CONFIG = {
     url: 'https://docs.google.com/spreadsheets/d/1tgvNH7Eqe8rv1TU0UyTY5vtCQAlKDmYCjSyV2IbppXk/edit',
   },
 
-  /** Planilha de indicadores (aba Operações, tudo abaixo de "Outros Indicadores"). */
+  /** Painel de Bordo DOPER (aba Operações, tudo abaixo de "Outros Indicadores"). */
   indicadores: {
-    spreadsheetId: '1WWmh3lUGDHKAe5J7k4QSV-Lpo15mgHH2yn6CT338kr0',
+    spreadsheetId: '19av-VN8iBAKNJzYpcLMziq_kLOjuy_yRUYYZnFI9Lr0',
     gid: '230818536',
     marcador: 'Outros Indicadores',
-    url: 'https://docs.google.com/spreadsheets/d/1WWmh3lUGDHKAe5J7k4QSV-Lpo15mgHH2yn6CT338kr0/edit?gid=230818536',
+    url: 'https://docs.google.com/spreadsheets/d/19av-VN8iBAKNJzYpcLMziq_kLOjuy_yRUYYZnFI9Lr0/edit?gid=230818536',
   },
 
   /**
