@@ -59,6 +59,8 @@
   function viewMonths(p) {
     const y = p.year;
     const ym = (m) => `${y}-${String(m).padStart(2, '0')}`;
+    // Meses escolhidos: o gráfico mostra exatamente esses meses, lado a lado
+    if (p.kind === 'custom') return { chart: p.months.slice(), focus: p.months.slice() };
     if (p.kind === 'year') { const all = Array.from({ length: 12 }, (_, i) => ym(i + 1)); return { chart: all, focus: all }; }
     const q = p.kind === 'quarter' ? p.quarter : Math.ceil(p.month / 3);
     const chart = [1, 2, 3].map((i) => ym((q - 1) * 3 + i));
@@ -79,6 +81,7 @@
    * @returns {string[]} "AAAA-MM"
    */
   function avgMonths(p) {
+    if (p.kind === 'custom') return p.months.slice(); // análise conjunta: média só dos meses escolhidos
     const all = viewMonths({ kind: 'year', year: p.year }).chart;
     const end = p.kind === 'year' ? all[11] : F.periodMonths(p).slice(-1)[0];
     return all.filter((m) => m <= end);
@@ -210,7 +213,9 @@
     const am = avgMonths(p);
     const hasData = ind.blocks.some((b) => vm.chart.some((m) => b.months.includes(m)));
     const head = pageHead(`Indicadores / ${F.periodShort(p)}`, 'Indicadores financeiros',
-      `Painel de Bordo · aba Operações. Em destaque, a média mensal de ${p.year}${p.kind === 'year' ? '' : ` até ${esc(F.MESES[Number(am[am.length - 1].slice(5)) - 1])}`}; o gráfico mostra ${p.kind === 'year' ? 'o ano' : esc(F.periodRange(p))}.`,
+      p.kind === 'custom'
+        ? `Painel de Bordo · aba Operações. Em destaque, a média de ${esc(F.periodPhrase(p))}.`
+        : `Painel de Bordo · aba Operações. Em destaque, a média mensal de ${p.year}${p.kind === 'year' ? '' : ` até ${esc(F.MESES[Number(am[am.length - 1].slice(5)) - 1])}`}; o gráfico mostra ${p.kind === 'year' ? 'o ano' : esc(F.periodRange(p))}.`,
       openSheet);
 
     // Faixa de destaque: indicadores mais executivos (ordem de preferência)
@@ -705,5 +710,6 @@
     };
   }
 
-  Object.assign(window.Pages, { indicatorsPage, builderPage, settingsPage });
+  // _ind: leitura dos blocos de indicador, reaproveitada pela página de comparação
+  Object.assign(window.Pages, { indicatorsPage, builderPage, settingsPage, _ind: { headline, pick, byTheme } });
 })();

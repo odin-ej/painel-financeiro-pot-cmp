@@ -144,13 +144,55 @@
     const ym = (m) => `${p.year}-${String(m).padStart(2, '0')}`;
     if (p.kind === 'month') return [ym(p.month)];
     if (p.kind === 'quarter') return [1, 2, 3].map((i) => ym((p.quarter - 1) * 3 + i));
+    if (p.kind === 'custom') return p.months.slice();
     return dataMonths.filter((m) => m.startsWith(String(p.year)) && m <= lastMonth);
+  }
+
+  /**
+   * Cria um período "meses escolhidos" (análise conjunta de meses avulsos,
+   * inclusive de trimestres ou anos diferentes). Com um só mês, vira um período
+   * de mês comum.
+   * @param {string[]} months - "AAAA-MM" (ordem e repetições não importam)
+   * @returns {Period|null}
+   * @example customPeriod(['2026-08', '2026-01']) // → { kind:'custom', year:2026, months:['2026-01','2026-08'] }
+   */
+  function customPeriod(months) {
+    const ms = [...new Set(months)].filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
+    if (!ms.length) return null;
+    if (ms.length === 1) return { kind: 'month', year: Number(ms[0].slice(0, 4)), month: Number(ms[0].slice(5)) };
+    return { kind: 'custom', year: Number(ms[ms.length - 1].slice(0, 4)), months: ms };
+  }
+
+  /** "a, b e c" — junção de lista em português. */
+  function listPt(arr) {
+    return arr.length <= 1 ? arr.join('') : `${arr.slice(0, -1).join(', ')} e ${arr[arr.length - 1]}`;
+  }
+
+  /**
+   * Meses por extenso agrupados por ano: "janeiro, maio e agosto de 2026" ou
+   * "novembro de 2025 e janeiro de 2026". Com muitos meses, usa nomes curtos.
+   */
+  function monthsPhrase(months) {
+    const short = months.length > 4;
+    const byYear = {};
+    months.forEach((m) => { (byYear[m.slice(0, 4)] = byYear[m.slice(0, 4)] || []).push(Number(m.slice(5))); });
+    return listPt(Object.keys(byYear).sort().map((y) => `${listPt(byYear[y].map((n) => (short ? MESES_CURTOS[n - 1].toLowerCase() : MESES[n - 1])))} de ${y}`));
+  }
+
+  /**
+   * Período por extenso para frases: "julho a setembro de 2026", "agosto de 2026",
+   * "janeiro, maio e agosto de 2026". Sempre inclui o ano.
+   */
+  function periodPhrase(p) {
+    if (p.kind === 'custom') return monthsPhrase(p.months);
+    return `${periodRange(p)} de ${p.year}`;
   }
 
   /** Rótulo longo do período: "Agosto de 2026", "3º trimestre de 2026", "Acumulado 2026". */
   function periodLabel(p) {
     if (p.kind === 'month') return monthLabel(`${p.year}-${String(p.month).padStart(2, '0')}`);
     if (p.kind === 'quarter') return `${p.quarter}º trimestre de ${p.year}`;
+    if (p.kind === 'custom') { const s = monthsPhrase(p.months); return s.charAt(0).toUpperCase() + s.slice(1); }
     return `Acumulado ${p.year}`;
   }
 
@@ -158,11 +200,16 @@
   function periodShort(p) {
     if (p.kind === 'month') return `${MESES_CURTOS[p.month - 1]} ${p.year}`;
     if (p.kind === 'quarter') return `Q${p.quarter} ${p.year}`;
+    if (p.kind === 'custom') {
+      const ys = [...new Set(p.months.map((m) => m.slice(0, 4)))];
+      return `${p.months.length} MESES${ys.length === 1 ? ' ' + ys[0] : ''}`;
+    }
     return `ACUMULADO ${p.year}`;
   }
 
   /** Intervalo por extenso: "julho a setembro", "agosto", "janeiro a setembro". */
   function periodRange(p) {
+    if (p.kind === 'custom') return monthsPhrase(p.months); // meses avulsos: lista (já com o ano)
     const ms = periodMonths(p).map((m) => MESES[Number(m.slice(5)) - 1]);
     if (!ms.length) return '';
     return ms.length === 1 ? ms[0] : `${ms[0]} a ${ms[ms.length - 1]}`;
@@ -176,13 +223,15 @@
     let q;
     if (p.kind === 'month') q = p.month === 1 ? { kind: 'month', year: p.year - 1, month: 12 } : { kind: 'month', year: p.year, month: p.month - 1 };
     else if (p.kind === 'quarter') q = p.quarter === 1 ? { kind: 'quarter', year: p.year - 1, quarter: 4 } : { kind: 'quarter', year: p.year, quarter: p.quarter - 1 };
+    // Meses avulsos: compara com os mesmos meses do ano anterior
+    else if (p.kind === 'custom') q = { kind: 'custom', year: p.year - 1, months: p.months.map((m) => `${Number(m.slice(0, 4)) - 1}${m.slice(4)}`) };
     else q = { kind: 'year', year: p.year - 1 };
     return periodMonths(q).some((m) => dataMonths.includes(m)) ? q : null;
   }
 
   /** Nome do período anterior para textos de comparação. */
   function prevLabel(p) {
-    return p.kind === 'month' ? 'mês anterior' : p.kind === 'quarter' ? 'trimestre anterior' : 'ano anterior';
+    return p.kind === 'month' ? 'mês anterior' : p.kind === 'quarter' ? 'trimestre anterior' : p.kind === 'custom' ? 'mesmos meses do ano anterior' : 'ano anterior';
   }
 
   /**
@@ -203,9 +252,11 @@
 
   /** Serializa/desserializa período para URL/armazenamento: "m-2026-8", "q-2026-3", "y-2026". */
   function periodKey(p) {
+    if (p.kind === 'custom') return `c-${p.months.join('.')}`; // "c-2026-01.2026-05"
     return p.kind === 'month' ? `m-${p.year}-${p.month}` : p.kind === 'quarter' ? `q-${p.year}-${p.quarter}` : `y-${p.year}`;
   }
   function parsePeriodKey(k) {
+    if (String(k || '').startsWith('c-')) return customPeriod(String(k).slice(2).split('.'));
     const [t, y, n] = String(k || '').split('-');
     const year = Number(y);
     if (!year) return null;
@@ -586,7 +637,7 @@
   window.Fin = {
     init, D, centers, centerById, catById, itemById, dataMonths, lastMonth, MESES, MESES_CURTOS, LIMIARES, STATUS,
     money, pct, signedPct, signedMoney, date, monthLabel, esc, norm,
-    periodMonths, periodLabel, periodShort, periodRange, prevPeriod, prevLabel, periodOptions, periodKey, parsePeriodKey,
+    periodMonths, periodLabel, periodShort, periodRange, periodPhrase, customPeriod, monthsPhrase, prevPeriod, prevLabel, periodOptions, periodKey, parsePeriodKey,
     metrics, aggregate, transactionsFor, itemsFor, unbudgetedTx, sortCenters, sortCategories, evolution, comparePrev,
     alerts, topCategories, topSpending, panorama, draftAnalysis, getAnalysis, saveAnalysis, incomeFor,
   };

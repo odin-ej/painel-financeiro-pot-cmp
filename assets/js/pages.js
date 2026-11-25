@@ -350,7 +350,7 @@
 
     const html = `
       ${pageHead(`Visão geral / ${F.periodShort(p)}`, 'Planejamento financeiro',
-        `Execução orçamentária de ${esc(F.periodRange(p))} de ${p.year}.`,
+        `Execução orçamentária de ${esc(F.periodPhrase(p))}.`,
         `<a class="btn btn-ghost" href="#/cmp${cmpMonth ? '/' + cmpMonth : ''}">Carta mensal <span class="arr">→</span></a>`)}
       ${hero(t, { label: 'Execução do POT', compare: U.deltaText(cmp) })}
 
@@ -466,7 +466,7 @@
       if (cm && cm.delta !== null) cmpMonthly = `<span class="delta"><b>${cm.delta > 0 ? '↑' : '↓'} ${F.pct(Math.abs(cm.delta))}</b> em ${F.MESES[lp.month - 1]} vs. mês anterior</span>`;
     }
     const evo = F.evolution(evoPeriod(p), { centerId: id });
-    const evoLabel = p.kind === 'year' ? 'Evolução do ano' : `Evolução do ${p.kind === 'month' ? 'trimestre de ' + F.MESES[p.month - 1] : 'trimestre'}`;
+    const evoLabel = p.kind === 'custom' ? 'Evolução dos meses escolhidos' : p.kind === 'year' ? 'Evolução do ano' : `Evolução do ${p.kind === 'month' ? 'trimestre de ' + F.MESES[p.month - 1] : 'trimestre'}`;
     const topTx = F.transactionsFor(p, { centerId: id }).slice().sort((x, y) => y.amount - x.amount).slice(0, 6);
 
     const tabs = F.centers.map((x) => `<a href="#/centros/${x.id}"${x.id === id ? ' aria-current="page"' : ''}>${esc(x.name)}</a>`).join('');
@@ -965,7 +965,7 @@
       .sort((x, y) => x.name.localeCompare(y.name, 'pt-BR')).map((c) => ({ value: c.id, label: c.name + (f.center ? '' : ` · ${F.centerById[c.centerId].name}`) }))];
 
     const html = `
-      ${pageHead(`Lançamentos / ${F.periodShort(p)}`, 'Lançamentos financeiros', `Valores realizados na planilha do POT em ${esc(F.periodRange(p))} de ${p.year}. O preenchimento continua sendo feito na planilha.`,
+      ${pageHead(`Lançamentos / ${F.periodShort(p)}`, 'Lançamentos financeiros', `Valores realizados na planilha do POT em ${esc(F.periodPhrase(p))}. O preenchimento continua sendo feito na planilha.`,
         `<a class="btn btn-ghost" href="${CFG.pot.url}" target="_blank" rel="noopener">Abrir planilha ${I('external')}</a>`)}
       <div class="filters">
         <label class="search"><span class="sr-only">Buscar lançamentos</span>${I('search')}<input id="tx-q" class="input" type="search" placeholder="Buscar — ex.: ENEJ" value="${esc(f.q)}"></label>

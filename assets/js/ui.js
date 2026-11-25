@@ -424,14 +424,16 @@
    * Barras agrupadas Planejado (cinza) × Realizado (Cyan Signal).
    * Cada grupo carrega data-center para navegação e data-tip para tooltip.
    * @param {Array<Object>} rows - métricas por centro (Fin.aggregate().byCenter)
+   * @param {{nav?:(r:Object)=>string}} [opts] - destino ao clicar no grupo (padrão: página do centro)
    * @returns {string} HTML
    */
-  function barsChart(rows) {
+  function barsChart(rows, opts = {}) {
+    const nav = opts.nav || ((r) => `#/centros/${r.id}`);
     const max = niceMax(Math.max(...rows.map((r) => Math.max(r.planned, r.realized)), 1));
     const ticks = [0, 0.25, 0.5, 0.75, 1];
     const grid = ticks.map((t) => `<div style="bottom:${t * 100}%"><span>${axisLabel(max * t)}</span></div>`).join('');
     const groups = rows.map((r) => `
-      <div class="group" role="button" tabindex="0" data-center="${r.id}" data-nav="#/centros/${r.id}" aria-label="${esc(r.name)}: planejado ${F.money(r.planned)}, realizado ${F.money(r.realized)}" data-tip="${esc(tipFin(r.name, r))}">
+      <div class="group" role="button" tabindex="0" data-center="${r.id}" data-nav="${nav(r)}" aria-label="${esc(r.name)}: planejado ${F.money(r.planned)}, realizado ${F.money(r.realized)}" data-tip="${esc(tipFin(r.name, r))}">
         <div class="cols">
           <div class="col planned" style="height:${(r.planned / max) * 100}%"></div>
           <div class="col realized${r.status === 'over' ? ' over' : ''}" style="height:${(r.realized / max) * 100}%"></div>

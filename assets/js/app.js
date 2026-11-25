@@ -160,8 +160,23 @@
    * `pp` guarda o que está sendo navegado no painel — só vira período de
    * verdade quando uma célula é clicada.
    */
-  const pp = { open: false, kind: 'quarter', year: 0 };
-  const KIND_TAG = { month: 'Mês', quarter: 'Tri', year: 'Ano' };
+  // multi/sel: modo "vários meses" da aba Mês — sel guarda os meses marcados ("AAAA-MM"),
+  // inclusive de anos diferentes (a seleção sobrevive à troca de ano no painel).
+  const pp = { open: false, kind: 'quarter', year: 0, multi: false, sel: [] };
+  const KIND_TAG = { month: 'Mês', quarter: 'Tri', year: 'Ano', custom: 'Meses' };
+  const MAX_COMPARE = 12; // colunas demais deixam a comparação ilegível
+
+  /** Estamos na página de comparação? (o seletor passa a editar os meses comparados) */
+  function onCompare() { return /^#\/comparar/.test(location.hash); }
+
+  /** Meses comparados, lidos da URL (#/comparar?m=2026-01,2026-05). */
+  function compareMonths() {
+    const q = new URLSearchParams((location.hash.split('?')[1]) || '');
+    return (q.get('m') || '').split(',').filter((m) => F.dataMonths.includes(m)).sort();
+  }
+
+  /** Abreviação "jan/26" usada no resumo da seleção. */
+  function shortYm(m) { return `${F.MESES_CURTOS[Number(m.slice(5)) - 1].toLowerCase()}/${m.slice(2, 4)}`; }
 
   /** O período tem ao menos um mês presente na planilha? */
   function hasData(p) { return F.periodMonths(p).some((m) => F.dataMonths.includes(m)); }
@@ -172,6 +187,7 @@
    */
   function stepPeriod(p, dir) {
     let q;
+    if (p.kind === 'custom') return null; // meses avulsos não têm "vizinho" natural
     if (p.kind === 'month') { const i = p.year * 12 + (p.month - 1) + dir; q = { kind: 'month', year: Math.floor(i / 12), month: (i % 12) + 1 }; }
     else if (p.kind === 'quarter') { const i = p.year * 4 + (p.quarter - 1) + dir; q = { kind: 'quarter', year: Math.floor(i / 4), quarter: (i % 4) + 1 }; }
     else q = { kind: 'year', year: p.year + dir };
@@ -183,12 +199,16 @@
 
   function periodSelector() {
     const p = state.period;
-    const prev = stepPeriod(p, -1), next = stepPeriod(p, 1);
+    const cmp = onCompare();
+    const prev = cmp ? null : stepPeriod(p, -1), next = cmp ? null : stepPeriod(p, 1);
     const chev = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
+    const cm = cmp ? compareMonths() : [];
+    const tag = cmp ? 'Comparar' : KIND_TAG[p.kind];
+    const val = cmp ? (cm.length ? cm.map(shortYm).join(' · ') : 'Escolher meses') : F.periodLabel(p);
     return `<div class="period" role="group" aria-label="Período de análise">
       <button class="pp-step" data-pp-step="-1" aria-label="Período anterior"${prev ? ` title="${F.esc(F.periodLabel(prev))}"` : ' disabled'}>‹</button>
-      <button class="pp-trigger" id="pp-trigger" aria-haspopup="dialog" aria-expanded="${pp.open}">
-        <span class="pp-tag">${KIND_TAG[p.kind]}</span><span class="pp-val">${F.esc(F.periodLabel(p))}</span>${chev}
+      <button class="pp-trigger" id="pp-trigger" aria-haspopup="dialog" aria-expanded="${pp.open}" title="${F.esc(val)}">
+        <span class="pp-tag${cmp || p.kind === 'custom' ? ' is-multi' : ''}">${tag}</span><span class="pp-val">${F.esc(val)}</span>${chev}
       </button>
       <button class="pp-step" data-pp-step="1" aria-label="Próximo período"${next ? ` title="${F.esc(F.periodLabel(next))}"` : ' disabled'}>›</button>
       ${pp.open ? periodPopover() : ''}
@@ -207,8 +227,18 @@
         <b>${main}</b>${sub ? `<span>${sub}</span>` : ''}</button>`;
     };
     let grid;
-    if (pp.kind === 'month') {
-      grid = `<div class="pp-grid pp-months">${F.MESES_CURTOS.map((nm, i) => cell({ kind: 'month', year: pp.year, month: i + 1 }, nm.charAt(0) + nm.slice(1).toLowerCase(), '', pp.year === today.y && i + 1 === today.m)).join('')}</div>`;
+    const nome = (nm) => nm.charAt(0) + nm.slice(1).toLowerCase();
+    if (pp.kind === 'month' && pp.multi) {
+      // Modo vários meses: cada célula liga/desliga o mês na seleção
+      grid = `<div class="pp-grid pp-months is-multi">${F.MESES_CURTOS.map((nm, i) => {
+        const ym = `${pp.year}-${String(i + 1).padStart(2, '0')}`;
+        const isNow = pp.year === today.y && i + 1 === today.m;
+        const on = pp.sel.includes(ym);
+        const full = !on && pp.sel.length >= MAX_COMPARE;
+        return `<button class="pp-cell${isNow ? ' is-now' : ''}" data-pp-toggle="${ym}" aria-pressed="${on}"${F.dataMonths.includes(ym) && !full ? '' : ' disabled'}><b>${nome(nm)}</b><i class="pp-box" aria-hidden="true"></i></button>`;
+      }).join('')}</div>`;
+    } else if (pp.kind === 'month') {
+      grid = `<div class="pp-grid pp-months">${F.MESES_CURTOS.map((nm, i) => cell({ kind: 'month', year: pp.year, month: i + 1 }, nome(nm), '', pp.year === today.y && i + 1 === today.m)).join('')}</div>`;
     } else if (pp.kind === 'quarter') {
       grid = `<div class="pp-grid pp-quarters">${[1, 2, 3, 4].map((t) => cell({ kind: 'quarter', year: pp.year, quarter: t }, `${t}º tri`,
         `${F.MESES_CURTOS[(t - 1) * 3].toLowerCase()} – ${F.MESES_CURTOS[(t - 1) * 3 + 2].toLowerCase()}`, pp.year === today.y && Math.ceil(today.m / 3) === t)).join('')}</div>`;
@@ -226,10 +256,31 @@
         <span class="pp-year-n">${pp.year}</span>
         <button class="pp-nav" data-pp-year="1" aria-label="Próximo ano"${yi >= 0 && yi < years.length - 1 ? '' : ' disabled'}>›</button>
       </div>`}
+      ${pp.kind === 'month' ? `<button class="pp-multi" data-pp-multi aria-pressed="${pp.multi}"><i class="pp-switch" aria-hidden="true"></i>Vários meses<span>análise conjunta ou comparação</span></button>` : ''}
       ${grid}
-      <div class="pp-foot">
+      ${pp.kind === 'month' && pp.multi ? multiFoot() : `<div class="pp-foot">
         <span class="label"><i class="pp-now-dot"></i>Atual</span>
         <button class="btn btn-quiet btn-sm" data-pp-today>Ir para o atual</button>
+      </div>`}
+    </div>`;
+  }
+
+  /**
+   * Rodapé do modo vários meses: resumo da seleção (com meses de outros anos)
+   * e as duas ações — analisar juntos (vira o período global) ou comparar lado a lado.
+   */
+  function multiFoot() {
+    const n = pp.sel.length;
+    const other = pp.sel.filter((m) => !m.startsWith(String(pp.year))).length;
+    return `<div class="pp-foot pp-foot-multi">
+      <div class="pp-selsum">
+        <span class="label">${n ? `${n} ${n === 1 ? 'mês' : 'meses'}` : 'Nenhum mês marcado'}${other ? ` · ${other} de outro ano` : ''}</span>
+        ${n ? `<button class="btn btn-quiet btn-sm" data-pp-clear>Limpar</button>` : ''}
+      </div>
+      ${n ? `<div class="pp-selchips">${pp.sel.map((m) => `<span class="pp-chip">${shortYm(m)}</span>`).join('')}</div>` : '<p class="pp-help">Marque meses de qualquer trimestre ou ano.</p>'}
+      <div class="pp-actions">
+        <button class="btn btn-ghost btn-sm" data-pp-compare${n >= 2 ? '' : ' disabled'} title="Meses lado a lado">Comparar</button>
+        <button class="btn btn-primary btn-sm" data-pp-join${n >= 1 ? '' : ' disabled'} title="Somar os meses e analisar como um só período">Analisar juntos</button>
       </div>
     </div>`;
   }
@@ -237,7 +288,19 @@
   /** Abre/fecha o painel; ao abrir, começa no tipo e ano do período em uso. */
   function togglePicker(open) {
     pp.open = open;
-    if (open) { pp.kind = state.period.kind; pp.year = state.period.year; }
+    if (open) {
+      const p = state.period;
+      const cm = onCompare() ? compareMonths() : [];
+      if (cm.length || p.kind === 'custom') {
+        // Reabre já no modo vários meses, com a seleção em uso
+        pp.kind = 'month'; pp.multi = true;
+        pp.sel = cm.length ? cm : p.months.slice();
+        pp.year = Number(pp.sel[pp.sel.length - 1].slice(0, 4));
+      } else {
+        pp.kind = p.kind; pp.year = p.year; pp.multi = onCompare();
+        pp.sel = p.kind === 'month' ? F.periodMonths(p) : [];
+      }
+    }
     redrawPicker(open);
   }
 
@@ -250,6 +313,11 @@
       const el = ps.querySelector('.pp-cell[aria-pressed="true"]') || ps.querySelector('.pp-cell:not([disabled])');
       if (el) el.focus();
     }
+  }
+
+  /** Aplica um período escolhido no painel; na comparação, sai para a Visão Geral. */
+  function applyPeriod(q) {
+    if (onCompare()) { setPeriod(q, true); pp.open = false; location.hash = '#/visao-geral'; } else setPeriod(q);
   }
 
   /** Período "atual" do tipo pedido (mês/trimestre/ano corrente da planilha). */
@@ -279,7 +347,9 @@
   function render(keepDrawer) {
     if (!state.period) return; // ainda carregando
     const { parts, query } = parseHash();
-    const ctx = { state, save, render, setPeriod };
+    // ?p=<chave> na URL define o período (links da comparação e links compartilhados)
+    if (query.p) { const q = F.parsePeriodKey(query.p); if (q && hasData(q)) { state.period = q; save(); } }
+    const ctx ={ state, save, render, setPeriod };
     const [a, b] = parts;
     let page, navKey;
     if (!a || a === 'visao-geral') { page = P.overview(ctx); navKey = 'overview'; }
@@ -288,6 +358,7 @@
     else if (a === 'pot' && b === 'construir') { page = P.builderPage(ctx, query); navKey = 'builder'; }
     else if (a === 'pot') { page = P.potPage(ctx); navKey = 'pot'; }
     else if (a === 'cmp') { page = P.cmpPage(ctx, b); navKey = 'cmp'; }
+    else if (a === 'comparar') { page = P.comparePage(ctx, query); navKey = 'compare'; }
     else if (a === 'indicadores') { page = P.indicatorsPage(ctx, b, query); navKey = 'ind'; }
     else if (a === 'lancamentos') { page = P.txPage(ctx, query); navKey = 'tx'; }
     else if (a === 'configuracoes') { page = P.settingsPage(ctx); navKey = 'settings'; }
@@ -359,9 +430,35 @@
       }
       const yr = t('[data-pp-year]');
       if (yr) { pp.year += Number(yr.dataset.ppYear); redrawPicker(false); const b = slot.querySelector(`[data-pp-year="${yr.dataset.ppYear}"]`); if (b && !b.disabled) b.focus(); return; }
+      if (t('[data-pp-multi]')) {
+        pp.multi = !pp.multi;
+        if (pp.multi && !pp.sel.length && state.period.kind === 'month') pp.sel = F.periodMonths(state.period);
+        redrawPicker(false); slot.querySelector('[data-pp-multi]').focus(); return;
+      }
+      const tg = t('[data-pp-toggle]');
+      if (tg) {
+        const m = tg.dataset.ppToggle;
+        pp.sel = pp.sel.includes(m) ? pp.sel.filter((x) => x !== m) : [...pp.sel, m].sort();
+        redrawPicker(false); slot.querySelector(`[data-pp-toggle="${m}"]`)?.focus(); return;
+      }
+      if (t('[data-pp-clear]')) { pp.sel = []; redrawPicker(false); return; }
+      if (t('[data-pp-join]')) {
+        const q = F.customPeriod(pp.sel);
+        if (!q) return;
+        // Saindo da comparação, a análise conjunta abre na Visão Geral
+        applyPeriod(q);
+        return;
+      }
+      if (t('[data-pp-compare]')) {
+        if (pp.sel.length < 2) return;
+        pp.open = false;
+        const h = `#/comparar?m=${pp.sel.join(',')}`;
+        if (location.hash === h) render(); else location.hash = h;
+        return;
+      }
       const pk = t('[data-pp-pick]');
-      if (pk) { const q = F.parsePeriodKey(pk.dataset.ppPick); if (q) setPeriod(q); document.getElementById('pp-trigger')?.focus(); return; }
-      if (t('[data-pp-today]')) { setPeriod(currentOf(pp.kind)); return; }
+      if (pk) { const q = F.parsePeriodKey(pk.dataset.ppPick); if (q) applyPeriod(q); document.getElementById('pp-trigger')?.focus(); return; }
+      if (t('[data-pp-today]')) { applyPeriod(currentOf(pp.kind)); return; }
       return;
     }
     if (pp.open) togglePicker(false); // clique fora fecha o painel
