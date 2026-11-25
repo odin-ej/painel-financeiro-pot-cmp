@@ -39,7 +39,7 @@
   /** Link direto para a linha de origem na aba [GERAL] (rastreabilidade até a célula). */
   function sheetRowLink(row, label) {
     const url = `https://docs.google.com/spreadsheets/d/${CFG.pot.spreadsheetId}/edit#gid=${CFG.pot.gidGeral}&range=A${row}`;
-    return `<a href="${url}" target="_blank" rel="noopener" class="sheet-link">${esc(label || `Linha ${row} da [GERAL]`)} ${I('external')}</a>`;
+    return `<a href="${url}" target="_blank" rel="noopener" class="sheet-link">${esc(label || 'Abrir na planilha do POT')} ${I('external')}</a>`;
   }
 
   /** Cabeçalho editorial de página: micro-label, título serif, texto auxiliar e ações. */
@@ -184,7 +184,7 @@
     const center = F.centerById[cat.centerId];
     const item = t.itemId ? F.itemById[t.itemId] : null;
     const head = `<div>${opt.back ? `<button class="btn btn-quiet btn-sm" data-back style="margin:-6px 0 10px -10px">${I('back')} Voltar</button>` : ''}
-      <span class="label" style="display:block">Lançamento · linha ${t.row} da planilha</span><h2 class="h2" style="margin-top:10px">${esc(t.description)}</h2></div>`;
+      <span class="label" style="display:block">Lançamento · planilha do POT</span><h2 class="h2" style="margin-top:10px">${esc(t.description)}</h2></div>`;
     const body = `
       <div class="display num" style="font-size:56px;margin-bottom:12px">${U.moneyDisplay(t.amount)}</div>
       <div style="margin-bottom:32px;display:flex;gap:8px;flex-wrap:wrap"><span class="badge tone-${item ? 'ok' : 'over'}">${item ? 'Orçado' : 'Gasto não orçado'}</span><span class="badge tone-idle">${esc(t.type === 'Fixo' ? 'Gasto fixo' : 'Gasto variável')}</span></div>
@@ -284,7 +284,7 @@
     const opts = (arr, v) => ['<option value="">—</option>', ...arr.map((x) => `<option${x === v ? ' selected' : ''}>${x}</option>`)].join('');
     const delTip = realized ? ` data-tip="${esc('<div class="tr">Itens com valor realizado não podem ser excluídos pelo painel.</div>')}"` : '';
     U.openModal(`
-      <span class="label">Editar item · linha ${it.row}</span>
+      <span class="label">Editar item</span>
       <h2 class="h2" style="margin:10px 0 24px">${esc(it.description)}</h2>
       <form id="eit" class="form-grid" novalidate>
         <label class="full"><span class="label">Descrição</span><input class="input" name="description" value="${esc(it.description)}" maxlength="200"></label>
@@ -322,7 +322,7 @@
       });
       m.querySelector('#eit-del').addEventListener('click', async () => {
         if (realized) return;
-        if (!window.confirm(`Excluir a linha ${it.row} ("${it.description}") da planilha? A exclusão não pode ser desfeita pelo painel.`)) return;
+        if (!window.confirm(`Excluir o item "${it.description}" da planilha? A exclusão não pode ser desfeita pelo painel.`)) return;
         busy(true); err.textContent = '';
         try {
           await S.post('deleteItem', { row: it.row, expect });
@@ -1016,7 +1016,7 @@
           const cat = F.catById[t.categoryId];
           return `<tr class="click" tabindex="0" data-tx="${t.id}">
             <td class="num mono" style="color:var(--ash)">${F.MESES_CURTOS[Number(t.date.slice(5, 7)) - 1]} ${t.date.slice(0, 4)}</td>
-            <td class="strong">${esc(t.description)}<span class="sub">${t.itemId ? `Planejado ${F.money(F.itemById[t.itemId].planned)} · linha ${t.row}` : `<span class="tone-over">Gasto não orçado</span> · linha ${t.row}`}</span></td>
+            <td class="strong">${esc(t.description)}<span class="sub">${t.itemId ? `Planejado ${F.money(F.itemById[t.itemId].planned)}` : '<span class="tone-over">Gasto não orçado</span>'}</span></td>
             <td>${esc(cat.name)}</td>
             <td>${esc(F.centerById[cat.centerId].name)}</td>
             <td class="r strong">${F.money(t.amount)}</td>

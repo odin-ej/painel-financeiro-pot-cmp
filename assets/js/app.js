@@ -207,7 +207,7 @@
     else if (a === 'pot' && b === 'construir') { page = P.builderPage(ctx, query); navKey = 'builder'; }
     else if (a === 'pot') { page = P.potPage(ctx); navKey = 'pot'; }
     else if (a === 'cmp') { page = P.cmpPage(ctx, b); navKey = 'cmp'; }
-    else if (a === 'indicadores') { page = P.indicatorsPage(ctx); navKey = 'ind'; }
+    else if (a === 'indicadores') { page = P.indicatorsPage(ctx, b); navKey = 'ind'; }
     else if (a === 'lancamentos') { page = P.txPage(ctx, query); navKey = 'tx'; }
     else if (a === 'configuracoes') { page = P.settingsPage(ctx); navKey = 'settings'; }
     else if (a === 'perfil') { page = P.profilePage(ctx); navKey = 'profile'; }

@@ -32,7 +32,7 @@
 
   /**
    * Escolhe a linha "manchete" de um bloco: Resultado > Porcentagem/% > última.
-   * É o número que o bloco existe para responder.
+   * É o número que o indicador existe para responder.
    */
   function headline(block) {
     return block.rows.find((r) => /^resultado/i.test(r.label))
@@ -41,9 +41,8 @@
   }
 
   /**
-   * Corta meses ainda não preenchidos: na planilha eles aparecem como "R$ -"
-   * (zero) e desenhariam uma queda falsa. Anula meses após o corrente e os
-   * zeros finais da série (mês em aberto).
+   * Anula meses ainda não preenchidos: na planilha aparecem como "R$ -" (zero)
+   * e desenhariam uma queda falsa. Zera meses após o corrente e os zeros finais.
    */
   function untilNow(block, values) {
     const out = values.map((v, i) => (block.months[i] > F.lastMonth ? null : v));
@@ -52,114 +51,259 @@
   }
 
   /**
-   * Séries desenhadas no gráfico: a manchete primeiro (recebe o Cyan Signal),
-   * depois as demais linhas da mesma unidade — no máximo 4 para manter a leitura.
+   * Meses exibidos no gráfico para o período global:
+   *  - mês → o trimestre que o contém (um ponto só não mostra tendência);
+   *  - trimestre → os 3 meses; ano → os 12 meses.
+   * Também devolve os meses "do período" (para o valor em destaque e a tabela).
    */
-  function plottedOf(block, h) {
-    return [h, ...block.rows.filter((r) => r !== h && r.kind === h.kind)].slice(0, 4).map((r) => ({ name: r.label, values: untilNow(block, r.values) }));
+  function viewMonths(p) {
+    const y = p.year;
+    const ym = (m) => `${y}-${String(m).padStart(2, '0')}`;
+    if (p.kind === 'year') { const all = Array.from({ length: 12 }, (_, i) => ym(i + 1)); return { chart: all, focus: all }; }
+    const q = p.kind === 'quarter' ? p.quarter : Math.ceil(p.month / 3);
+    const chart = [1, 2, 3].map((i) => ym((q - 1) * 3 + i));
+    return { chart, focus: p.kind === 'month' ? [ym(p.month)] : chart };
   }
 
-  /** Último valor preenchido (até o mês corrente) e o anterior, para variação. */
-  function latest(block, row) {
+  /** Recorta os valores de uma linha para uma lista de meses (null onde o bloco não tem o mês). */
+  function pick(block, row, months) {
     const vals = untilNow(block, row.values);
-    let i = vals.length - 1;
-    while (i >= 0 && vals[i] === null) i--;
+    return months.map((m) => { const i = block.months.indexOf(m); return i < 0 ? null : vals[i]; });
+  }
+
+  /**
+   * Valor em destaque no período: o mês selecionado ou o último mês preenchido
+   * do trimestre/ano. Traz também o mês anterior preenchido, para a variação.
+   */
+  function valueAt(block, row, focus) {
+    const vals = untilNow(block, row.values);
+    let i = -1;
+    focus.forEach((m) => { const k = block.months.indexOf(m); if (k >= 0 && vals[k] !== null) i = k; });
     if (i < 0) return null;
     let j = i - 1;
     while (j >= 0 && vals[j] === null) j--;
-    return { i, v: vals[i], prev: j >= 0 ? vals[j] : null, month: block.months[i] };
+    return { v: vals[i], prev: j >= 0 ? vals[j] : null, month: block.months[i], prevMonth: j >= 0 ? block.months[j] : null };
   }
 
-  /** Texto da variação contra o mês anterior, na unidade do indicador. */
+  /** Texto da variação contra o mês anterior preenchido, na unidade do indicador. */
   function deltaKind(row, l) {
     if (!l || l.prev === null) return '';
     const d = l.v - l.prev;
     if (Math.abs(d) < 1e-9) return '<span class="delta text-fog">= mês anterior</span>';
-    const arrow = d > 0 ? '↑' : '↓';
     const txt = row.kind === 'pct' ? `${F.pct(Math.abs(d)).replace('%', '')} p.p.` : U.fmtKind(row.kind, Math.abs(d));
-    return `<span class="delta"><b>${arrow} ${esc(txt)}</b> vs. ${esc(F.MESES[Number(l.month.slice(5)) - 2] || 'mês anterior')}</span>`;
+    return `<span class="delta"><b>${d > 0 ? '↑' : '↓'} ${esc(txt)}</b> vs. ${esc(F.MESES[Number(l.prevMonth.slice(5)) - 1])}</span>`;
   }
 
-  function indicatorsPage(ctx) {
+  /** Séries do gráfico: a manchete primeiro (Cyan Signal) e as linhas da mesma unidade, até 4. */
+  function plottedOf(block, h, months, onlyKind, hidden) {
+    const kind = onlyKind || h.kind;
+    const first = h.kind === kind ? [h] : [];
+    return [...first, ...block.rows.filter((r) => r !== h && r.kind === kind)]
+      .filter((r) => !hidden || !hidden.has(r.label)).slice(0, 4)
+      .map((r) => ({ name: r.label, values: pick(block, r, months) }));
+  }
+
+  /** Chips de meta/progresso/total vindos da planilha. */
+  function chipsOf(b, h) {
+    return [b.meta && `<span class="chip">Meta ${esc(b.meta)}</span>`, b.progress && `<span class="chip">Progresso ${esc(b.progress)}</span>`, h.total && `<span class="chip">Total ${esc(h.total)}</span>`].filter(Boolean).join('');
+  }
+
+  /** Tabela de valores do bloco nos meses indicados (meses do período em destaque). */
+  function dataTable(b, months, focus) {
+    return `<div class="table-wrap"><table class="t ind-table" style="min-width:${Math.max(420, 160 + months.length * 96)}px">
+      <thead><tr><th>Linha</th>${months.map((m) => `<th class="r${focus.includes(m) ? ' is-focus' : ''}">${F.MESES_CURTOS[Number(m.slice(5)) - 1]}</th>`).join('')}<th class="r">Total</th></tr></thead>
+      <tbody>${b.rows.map((r) => {
+        const vals = pick(b, r, months);
+        return `<tr><td class="strong">${esc(r.label)}</td>${vals.map((v, i) => `<td class="r${focus.includes(months[i]) ? ' is-focus' : ''}">${esc(U.fmtKind(r.kind, v))}</td>`).join('')}<td class="r">${esc(r.total || '—')}</td></tr>`;
+      }).join('')}</tbody></table></div>`;
+  }
+
+  /** Seletor "ver indicador sozinho", agrupado pela ordem da planilha. */
+  function indicatorPicker(ind, current) {
+    const opts = [{ value: '', label: 'Todos os indicadores' }, ...ind.blocks.map((b) => ({ value: b.id, label: b.title }))];
+    return U.select('ind-pick', opts, current || '', { label: 'Ver um indicador' });
+  }
+
+  /** Estado vazio/erro comum às duas telas de indicadores. */
+  function indicatorsUnavailable(head, st) {
+    const denied = st.indCode === 'denied' || st.indCode === 'network';
+    return `${head}<div class="panel notice">
+      <span class="label tone-limit">Planilha de indicadores indisponível</span>
+      <h2 class="h2" style="margin:12px 0 16px">${denied ? 'A planilha ainda não está compartilhada' : 'Não encontramos os indicadores'}</h2>
+      ${denied ? `<p class="body-sm" style="max-width:640px">O painel lê a planilha direto do navegador, então ela precisa permitir leitura por link. Na planilha, clique em <strong class="text-cloud">Compartilhar → Acesso geral → Qualquer pessoa com o link (Leitor)</strong>. Depois, volte aqui e atualize.</p>`
+        : `<p class="body-sm" style="max-width:640px">A aba foi lida, mas nenhum bloco foi encontrado abaixo de “${esc(CFG.indicadores.marcador)}”. Confira se o marcador continua na aba Operações.</p>`}
+      <p class="label" style="margin-top:16px">Detalhe: ${esc(st.indError || 'sem resposta')}</p>
+      <button class="btn btn-primary" style="margin-top:24px" data-reload>${I('refresh')} Tentar de novo</button>
+    </div>`;
+  }
+
+  /** Liga o seletor de indicador (navega para a visão individual). */
+  function mountPicker(view) {
+    const sel = view.querySelector('#ind-pick');
+    if (sel) sel.addEventListener('change', (e) => { location.hash = e.target.value ? `#/indicadores/${e.target.value}` : '#/indicadores'; });
+    const r = view.querySelector('[data-reload]');
+    if (r) r.addEventListener('click', () => window.App.reload(true));
+  }
+
+  function indicatorsPage(ctx, id) {
     const sync = window.App.sync;
     const ind = sync.indicators;
     const st = sync.status || {};
-    const head = pageHead('Indicadores', 'Indicadores financeiros',
-      'Outros indicadores da aba Operações, lidos automaticamente da planilha. O preenchimento continua sendo feito por lá.',
-      `<a class="btn btn-ghost" href="${CFG.indicadores.url}" target="_blank" rel="noopener">Abrir planilha ${I('external')}</a>`);
+    const p = ctx.state.period;
+    const openSheet = `<a class="btn btn-ghost" href="${CFG.indicadores.url}" target="_blank" rel="noopener">Abrir planilha ${I('external')}</a>`;
 
     if (!ind || !ind.blocks.length) {
-      const denied = st.indCode === 'denied' || st.indCode === 'network';
-      return {
-        title: 'Indicadores', crumbs: [['Indicadores']], hidePeriod: true,
-        html: `${head}<div class="panel notice">
-          <span class="label tone-limit">Planilha de indicadores indisponível</span>
-          <h2 class="h2" style="margin:12px 0 16px">${denied ? 'A planilha ainda não está compartilhada' : 'Não encontramos os indicadores'}</h2>
-          ${denied ? `<p class="body-sm" style="max-width:640px">O painel lê a planilha direto do navegador, então ela precisa permitir leitura por link. Na planilha, clique em <strong class="text-cloud">Compartilhar → Acesso geral → Qualquer pessoa com o link (Leitor)</strong>. Depois, volte aqui e atualize.</p>`
-            : `<p class="body-sm" style="max-width:640px">A aba foi lida, mas nenhum bloco foi encontrado abaixo de “${esc(CFG.indicadores.marcador)}”. Confira se o marcador continua na aba Operações.</p>`}
-          <p class="label" style="margin-top:16px">Detalhe: ${esc(st.indError || 'sem resposta')}</p>
-          <button class="btn btn-primary" style="margin-top:24px" data-reload>${I('refresh')} Tentar de novo</button>
-        </div>`,
-        mount(view) { view.querySelector('[data-reload]').addEventListener('click', () => window.App.reload(true)); },
-      };
+      const head = pageHead('Indicadores', 'Indicadores financeiros', '', openSheet);
+      return { title: 'Indicadores', crumbs: [['Indicadores']], html: indicatorsUnavailable(head, st), mount: mountPicker };
     }
+    if (id) return indicatorDetail(ctx, ind, id, openSheet);
 
-    // Faixa de destaque: manchetes dos blocos mais executivos (ordem de preferência)
-    const PREF = [/resultado de caixa/i, /cash runway/i, /variacao de caixa|variação de caixa/i, /vivencia|vivência/i, /eficiencia|eficiência/i];
+    const vm = viewMonths(p);
+    const hasData = ind.blocks.some((b) => vm.chart.some((m) => b.months.includes(m)));
+    const head = pageHead(`Indicadores / ${F.periodShort(p)}`, 'Indicadores financeiros',
+      `Painel de Bordo · aba Operações. ${p.kind === 'month' ? `Valores de ${esc(F.periodLabel(p).toLowerCase())}, com o trimestre como contexto.` : `Valores de ${esc(F.periodRange(p))} de ${p.year}.`}`,
+      `${indicatorPicker(ind)}${openSheet}`);
+
+    // Faixa de destaque: indicadores mais executivos (ordem de preferência)
+    const PREF = [/resultado de caixa/i, /cash runway/i, /conversao de receitas|conversão de receitas/i, /rigidez/i];
     const picked = [];
     PREF.forEach((re) => { const b = ind.blocks.find((x) => re.test(x.title) && !picked.includes(x)); if (b && picked.length < 4) picked.push(b); });
     ind.blocks.forEach((b) => { if (picked.length < 4 && !picked.includes(b)) picked.push(b); });
 
     const strip = picked.map((b) => {
       const h = headline(b);
-      const l = latest(b, h);
-      return `<a class="cell ind-kpi" href="#ind-${b.id}">
+      const l = valueAt(b, h, vm.focus);
+      return `<a class="cell ind-kpi" href="#/indicadores/${b.id}">
         <span class="label">${esc(b.title)}</span>
         <div class="value num">${l ? esc(U.fmtKind(h.kind, l.v)) : '—'}</div>
-        <div class="hint">${esc(h.label)}${l ? ` · ${esc(F.monthLabel(l.month))}` : ''}</div>
+        <div class="hint">${l ? esc(F.monthLabel(l.month)) : 'Sem valor no período'}</div>
       </a>`;
     }).join('');
 
     const cards = ind.blocks.map((b) => {
       const h = headline(b);
-      const l = latest(b, h);
-      const plotted = plottedOf(b, h);
-      const chips = [h.meta && `<span class="chip">Meta ${esc(h.meta)}</span>`, h.progress && `<span class="chip">Progresso ${esc(h.progress)}</span>`, h.total && `<span class="chip">Total ${esc(h.total)}</span>`].filter(Boolean).join('');
-      const table = `<div class="table-wrap"><table class="t ind-table">
-        <thead><tr><th>Linha</th>${b.months.map((m) => `<th class="r">${F.MESES_CURTOS[Number(m.slice(5)) - 1]}</th>`).join('')}<th class="r">Total</th></tr></thead>
-        <tbody>${b.rows.map((r) => `<tr><td class="strong">${esc(r.label)}</td>${r.values.map((v, i) => `<td class="r${b.months[i] > F.lastMonth ? ' text-fog' : ''}">${esc(U.fmtKind(r.kind, v))}</td>`).join('')}<td class="r">${esc(r.total || '—')}</td></tr>`).join('')}</tbody>
-      </table></div>`;
+      const l = valueAt(b, h, vm.focus);
+      const plotted = plottedOf(b, h, vm.chart);
+      const chips = chipsOf(b, h);
       return `<article class="panel ind-card" id="ind-${b.id}" data-block="${b.id}">
         <div class="panel-head" style="margin-bottom:16px">
-          <div><span class="label">${esc(b.note || `Linha ${b.sheetRow} da aba`)}</span><h2 class="h2" style="margin-top:8px">${esc(b.title)}</h2></div>
+          <div>${b.group || b.note ? `<span class="label">${esc(b.group || b.note)}</span>` : ''}<h2 class="h2" style="margin-top:8px"><a href="#/indicadores/${b.id}" class="ind-title">${esc(b.title)}</a></h2></div>
         </div>
         <div class="ind-head">
           <div><span class="label">${esc(h.label)}${l ? ` · ${esc(F.monthLabel(l.month))}` : ''}</span>
             <div class="display num ind-value">${l ? esc(U.fmtKind(h.kind, l.v)) : '—'}</div>
-            ${deltaKind(h, l)}</div>
+            ${l ? deltaKind(h, l) : '<span class="delta text-fog">Sem valor preenchido no período</span>'}</div>
           ${chips ? `<div class="ind-chips">${chips}</div>` : ''}
         </div>
-        ${U.seriesChart(b.months, plotted, h.kind)}
+        ${U.seriesChart(vm.chart, plotted, h.kind)}
         <div class="legend" style="margin-top:4px">${plotted.map((s, k) => `<span><i class="line" style="background:${U.SERIES_COLORS[k]}"></i>${esc(s.name)}</span>`).join('')}</div>
-        <details class="ind-details"><summary class="btn btn-quiet btn-sm">Ver dados do bloco</summary>${table}</details>
+        <div class="ind-foot">
+          <details class="ind-details"><summary class="btn btn-quiet btn-sm">Ver dados</summary>${dataTable(b, vm.chart, vm.focus)}</details>
+          <a class="btn btn-ghost btn-sm" href="#/indicadores/${b.id}">Ver sozinho <span class="arr">→</span></a>
+        </div>
       </article>`;
     }).join('');
 
     const html = `${head}
       ${st.ind === 'cache' ? `<div class="pending-int" style="margin:-24px 0 32px">Sem acesso à planilha agora — exibindo a cópia lida em ${esc(stamp(st.indCachedAt))}.</div>` : ''}
-      <div class="stat-strip ind-strip" style="margin-bottom:var(--s48)">${strip}</div>
-      <div class="ind-grid">${cards}</div>
-      <p class="label" style="margin-top:var(--s40)">${ind.blocks.length} blocos lidos abaixo de “${esc(CFG.indicadores.marcador)}” · atualizado ${esc(stamp(st.loadedAt))}</p>`;
+      ${hasData ? `<div class="stat-strip ind-strip" style="margin-bottom:var(--s48)">${strip}</div><div class="ind-grid">${cards}</div>`
+        : `<div class="panel notice"><span class="label">Sem dados</span><p class="body-sm" style="margin-top:8px">A aba de indicadores não tem valores para ${esc(F.periodLabel(p))}. Selecione um período de ${esc([...new Set(ind.blocks[0].months.map((m) => m.slice(0, 4)))].join(', '))}.</p></div>`}
+      <p class="label" style="margin-top:var(--s40)">${ind.blocks.length} indicadores lidos abaixo de “${esc(CFG.indicadores.marcador)}” · atualizado ${esc(stamp(st.loadedAt))}</p>`;
 
     return {
-      title: 'Indicadores', crumbs: [['Indicadores']], html, hidePeriod: true,
+      title: 'Indicadores', crumbs: [['Indicadores']], html,
       mount(view) {
+        mountPicker(view);
+        if (!hasData) return;
         ind.blocks.forEach((b) => {
           const card = view.querySelector(`[data-block="${b.id}"]`);
           const h = headline(b);
-          const plotted = plottedOf(b, h);
-          U.mountSeries(card, b.months, plotted, h.kind, b.rows.map((r) => ({ ...r, values: untilNow(b, r.values) })));
+          U.mountSeries(card, vm.chart, plottedOf(b, h, vm.chart), h.kind, b.rows.map((r) => ({ ...r, values: pick(b, r, vm.chart) })));
         });
+      },
+    };
+  }
+
+  /**
+   * Visão individual de um indicador: valor do período, escolha da unidade e
+   * das séries no gráfico, tabela do período e navegação entre indicadores.
+   */
+  function indicatorDetail(ctx, ind, id, openSheet) {
+    const p = ctx.state.period;
+    const idx = ind.blocks.findIndex((b) => b.id === id);
+    if (idx < 0) {
+      return { title: 'Indicador', crumbs: [['Indicadores', '#/indicadores'], ['Não encontrado']], html: pageHead('Indicadores', 'Indicador não encontrado', 'Ele pode ter sido renomeado na planilha.', `${indicatorPicker(ind)}`), mount: mountPicker };
+    }
+    const b = ind.blocks[idx];
+    const h = headline(b);
+    const vm = viewMonths(p);
+    const l = valueAt(b, h, vm.focus);
+    const kinds = [...new Set([h.kind, ...b.rows.map((r) => r.kind)])];
+    const KIND_LABEL = { money: 'R$', pct: '%', num: 'Nº' };
+    ctx.state.indView = ctx.state.indView || {};
+    const vs = ctx.state.indView[id] || (ctx.state.indView[id] = { kind: h.kind, hidden: new Set() });
+    if (!kinds.includes(vs.kind)) vs.kind = h.kind;
+    const prev = ind.blocks[idx - 1], next = ind.blocks[idx + 1];
+    const yearMonths = viewMonths({ kind: 'year', year: p.year }).chart;
+
+    const html = `
+      <nav class="crumbs-inline"><a class="label" href="#/indicadores">← Todos os indicadores</a></nav>
+      ${pageHead(`Indicador / ${F.periodShort(p)}`, esc(b.title), b.group ? `Parte de ${esc(b.group)} · Painel de Bordo` : 'Painel de Bordo · aba Operações', `${indicatorPicker(ind, id)}${openSheet}`)}
+      <section class="hero" aria-label="${esc(b.title)}">
+        <div class="hero-main">
+          <div class="hero-foot"><span class="label label-strong">${esc(h.label)}</span><span class="label">${l ? esc(F.monthLabel(l.month)) : esc(F.periodLabel(p))}</span></div>
+          <div class="hero-figure"><span class="display num" style="font-size:clamp(56px,7vw,96px)">${l ? esc(U.fmtKind(h.kind, l.v)) : '—'}</span></div>
+          <div class="hero-foot">${l ? deltaKind(h, l) : '<span class="delta text-fog">Sem valor preenchido no período selecionado</span>'}</div>
+        </div>
+        <div class="stats">
+          ${b.rows.filter((r) => r !== h).slice(0, 4).map((r) => { const v = valueAt(b, r, vm.focus); return `<div class="stat"><div><span class="label">${esc(r.label)}</span><div class="hint">${v ? esc(F.monthLabel(v.month)) : '—'}</div></div><span class="value num" style="font-size:24px">${v ? esc(U.fmtKind(r.kind, v.v)) : '—'}</span></div>`; }).join('')}
+          ${b.meta || b.progress ? `<div class="stat"><div><span class="label">Meta</span><div class="hint">${b.progress ? `Progresso ${esc(b.progress)}` : 'Definida na planilha'}</div></div><span class="value" style="font-size:20px">${esc(b.meta || '—')}</span></div>` : ''}
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="panel">
+          <div class="panel-head">
+            <div><span class="label">Evolução · ${p.kind === 'year' ? esc(String(p.year)) : 'ano de ' + p.year}</span><h2 class="h2" style="margin-top:8px">Mês a mês</h2></div>
+            ${kinds.length > 1 ? `<div class="seg" role="group" aria-label="Unidade do gráfico">${kinds.map((k) => `<button data-kind-ind="${k}" aria-pressed="${vs.kind === k}">${KIND_LABEL[k]}</button>`).join('')}</div>` : ''}
+          </div>
+          <div class="series-toggles" role="group" aria-label="Séries no gráfico">${b.rows.filter((r) => r.kind === vs.kind).map((r) => `<button class="toggle" data-series-row="${esc(r.label)}" aria-pressed="${!vs.hidden.has(r.label)}">${esc(r.label)}</button>`).join('')}</div>
+          <div id="ind-chart"></div>
+        </div>
+      </section>
+
+      <section class="section">
+        ${sectionHead('Valores', p.kind === 'year' ? `Todos os meses de ${p.year}` : `${esc(F.periodLabel(p))} em destaque`)}
+        ${dataTable(b, yearMonths, vm.focus)}
+      </section>
+
+      <nav class="ind-nav">
+        ${prev ? `<a class="btn btn-ghost" href="#/indicadores/${prev.id}">← ${esc(prev.title)}</a>` : '<span></span>'}
+        ${next ? `<a class="btn btn-ghost" href="#/indicadores/${next.id}">${esc(next.title)} →</a>` : ''}
+      </nav>`;
+
+    /** Redesenha só o gráfico (troca de unidade/séries), sem recarregar a página. */
+    function drawChart(view) {
+      const plotted = plottedOf(b, h, yearMonths, vs.kind, vs.hidden);
+      const box = view.querySelector('#ind-chart');
+      box.innerHTML = plotted.length
+        ? `${U.seriesChart(yearMonths, plotted, vs.kind)}<div class="legend" style="margin-top:4px">${plotted.map((s, k) => `<span><i class="line" style="background:${U.SERIES_COLORS[k]}"></i>${esc(s.name)}</span>`).join('')}</div>`
+        : '<div class="empty">Selecione ao menos uma série.</div>';
+      if (plotted.length) U.mountSeries(box, yearMonths, plotted, vs.kind, b.rows.map((r) => ({ ...r, values: pick(b, r, yearMonths) })));
+    }
+
+    return {
+      title: b.title, crumbs: [['Indicadores', '#/indicadores'], [b.title]], html,
+      mount(view) {
+        mountPicker(view);
+        drawChart(view);
+        view.querySelectorAll('[data-kind-ind]').forEach((btn) => btn.addEventListener('click', () => { vs.kind = btn.dataset.kindInd; ctx.render(); }));
+        view.querySelectorAll('[data-series-row]').forEach((btn) => btn.addEventListener('click', () => {
+          const k = btn.dataset.seriesRow;
+          vs.hidden.has(k) ? vs.hidden.delete(k) : vs.hidden.add(k);
+          btn.setAttribute('aria-pressed', !vs.hidden.has(k));
+          drawChart(view);
+        }));
       },
     };
   }
@@ -244,10 +388,10 @@
       <section class="section" aria-labelledby="sec-exist">
         ${sectionHead('Já na planilha', `<span id="sec-exist">${existing.items.length} itens planejados em ${esc(F.periodLabel(q))}</span>`)}
         ${existing.items.length ? `<div class="table-wrap"><table class="t wide" id="b-exist">
-          <thead><tr><th>Mês</th><th>Descrição</th><th>Categoria</th><th>Centro</th><th class="r">Planejado</th><th class="r">Realizado</th><th>Linha</th></tr></thead>
+          <thead><tr><th>Mês</th><th>Descrição</th><th>Categoria</th><th>Centro</th><th class="r">Planejado</th><th class="r">Realizado</th></tr></thead>
           <tbody>${existing.items.slice().sort((a, b) => a.date.localeCompare(b.date) || a.row - b.row).map((i) => {
             const m = existing.byItem[i.id]; const c = F.catById[i.categoryId];
-            return `<tr class="click" tabindex="0" data-item="${i.id}"><td class="mono">${F.MESES_CURTOS[Number(i.month.slice(5)) - 1]}</td><td class="strong">${esc(i.description)}</td><td>${esc(c.name)}</td><td>${esc(F.centerById[c.centerId].name)}</td><td class="r">${F.money(i.planned)}</td><td class="r">${F.money(m.realized)}</td><td class="mono text-fog">${i.row}</td></tr>`;
+            return `<tr class="click" tabindex="0" data-item="${i.id}"><td class="mono">${F.MESES_CURTOS[Number(i.month.slice(5)) - 1]}</td><td class="strong">${esc(i.description)}</td><td>${esc(c.name)}</td><td>${esc(F.centerById[c.centerId].name)}</td><td class="r">${F.money(i.planned)}</td><td class="r">${F.money(m.realized)}</td></tr>`;
           }).join('')}</tbody></table></div>` : '<div class="empty">Nenhum item deste trimestre na planilha ainda.</div>'}
       </section>`;
 

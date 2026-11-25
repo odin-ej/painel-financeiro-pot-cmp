@@ -299,8 +299,11 @@
         if (values.every((v) => v === null)) continue;
         const sample = rawVals.find((v) => v.trim() && !v.trim().startsWith('#')) || '';
         const clean = (s) => { const x = String(s || '').trim(); return x && !x.startsWith('#') ? x : ''; };
+        // Taxas calculadas sem "%" na célula (ex.: TCR = 60,73) são percentuais pelo nome
+        let kind = kindOf(sample);
+        if (kind === 'num' && /^porcentagem|^%$|taxa de conversao|rigidez operacional/.test(norm(label))) kind = 'pct';
         const rowObj = {
-          label: label.replace(/\s+/g, ' '), kind: kindOf(sample), values,
+          label: label.replace(/\s+/g, ' '), kind, values,
           total: totalCol >= 0 ? clean(r[totalCol]) : '', meta: metaCol >= 0 ? clean(r[metaCol]) : '', progress: progCol >= 0 ? clean(r[progCol]) : '',
         };
         data.push(rowObj);
@@ -311,9 +314,45 @@
       if (rawTitle.length <= 2 && data.length >= 2) rawTitle = `${data[1].label} (% de ${data[0].label.toLowerCase()})`;
       // Bloco sem título na planilha: nomeia pelos próprios indicadores
       if (!rawTitle && data.length) rawTitle = data.slice(0, 3).map((d) => d.label).join(' · ');
-      if (data.length) blocks.push({ id: slug(rawTitle) + '-' + blocks.length, title: rawTitle, note, months: months.map((m) => m.ym), rows: data, sheetRow: t + 1 });
+      if (!data.length) continue;
+      const ms = months.map((m) => m.ym);
+      splitComposite(data).forEach((part) => {
+        const title = part.title || rawTitle;
+        blocks.push({ title, group: part.title ? rawTitle : '', note, months: ms, rows: part.rows });
+      });
     }
+    // Ids estáveis pelo título (usados na URL da visão individual); repetidos ganham sufixo
+    const seen = {};
+    blocks.forEach((b) => {
+      const base = slug(b.title);
+      seen[base] = (seen[base] || 0) + 1;
+      b.id = seen[base] > 1 ? `${base}-${seen[base]}` : base;
+      const withMeta = b.rows.find((r) => r.meta) || {};
+      b.meta = withMeta.meta || '';
+      b.progress = withMeta.progress || '';
+    });
     return { blocks, entradas };
+  }
+
+  /**
+   * Separa blocos que reúnem mais de um indicador calculado.
+   *
+   * Ex.: "Saúde Financeira" tem [Entradas, Faturamento, TCR] e
+   * [Gastos Fixos, Faturamento, Rigidez Operacional]: cada taxa (linha não
+   * monetária logo após valores em R$) fecha um indicador próprio, com as
+   * linhas que a compõem. Blocos com uma única taxa ficam como estão.
+   *
+   * @param {Array} rows - linhas do bloco
+   * @returns {Array<{title:string, rows:Array}>} partes (title vazio = bloco inteiro)
+   */
+  function splitComposite(rows) {
+    const cuts = rows.map((r, i) => (i > 0 && r.kind !== 'money' && rows[i - 1].kind === 'money' ? i : -1)).filter((i) => i >= 0);
+    if (cuts.length < 2) return [{ title: '', rows }];
+    const parts = [];
+    let from = 0;
+    cuts.forEach((c) => { parts.push({ title: rows[c].label, rows: rows.slice(from, c + 1) }); from = c + 1; });
+    if (from < rows.length) parts[parts.length - 1].rows.push(...rows.slice(from));
+    return parts;
   }
 
   /* ------------------------------------------------------------------ */
