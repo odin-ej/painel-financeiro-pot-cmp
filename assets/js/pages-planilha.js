@@ -98,22 +98,6 @@
     return { v: filled.reduce((s, [, v]) => s + v, 0) / filled.length, n: filled.length, from: filled[0][0], to: lastM, last: { v: lastV, month: lastM } };
   }
 
-  /** "Média de 2026 · jan–out (10 meses)" — deixa claro quais meses entraram na conta. */
-  function avgLabel(a) {
-    const mc = (m) => F.MESES_CURTOS[Number(m.slice(5)) - 1].toLowerCase();
-    const y = a.from.slice(0, 4);
-    return a.n === 1 ? `Média de ${y} · só ${mc(a.from)} preenchido` : `Média de ${y} · ${mc(a.from)}–${mc(a.to)} (${a.n} meses)`;
-  }
-
-  /** Linha de apoio sob a média: último mês preenchido e se ficou acima/abaixo da média. */
-  function lastVsAvg(row, a) {
-    if (!a) return '<span class="delta text-fog">Sem valor preenchido no ano</span>';
-    if (a.n === 1) return `<span class="delta text-fog">${esc(F.monthLabel(a.last.month))}</span>`;
-    const d = a.last.v - a.v;
-    const pos = Math.abs(d) < 1e-9 ? 'na média' : d > 0 ? '↑ acima da média' : '↓ abaixo da média';
-    return `<span class="delta">Último · ${esc(F.MESES[Number(a.last.month.slice(5)) - 1])}: <b>${esc(U.fmtKind(row.kind, a.last.v))}</b> <span class="text-fog">${pos}</span></span>`;
-  }
-
   /** Séries do gráfico: a manchete primeiro (Cyan Signal) e as linhas da mesma unidade, até 4. */
   function plottedOf(block, h, months, onlyKind, hidden) {
     const kind = onlyKind || h.kind;
@@ -241,7 +225,7 @@
       return `<a class="cell ind-kpi" href="#/indicadores/${b.id}">
         <span class="label">${esc(b.title)}</span>
         <div class="value num">${a ? esc(U.fmtKind(h.kind, a.v)) : '—'}</div>
-        <div class="hint">${a ? esc(avgLabel(a)) : 'Sem valor no ano'}</div>
+        
       </a>`;
     }).join('');
 
@@ -255,9 +239,7 @@
           <div>${b.group ? `<span class="label">${esc(b.group)}</span>` : ''}<h2 class="h2"${b.group ? ' style="margin-top:8px"' : ''}><a href="#/indicadores/${b.id}" class="ind-title">${esc(b.title)}</a></h2></div>
         </div>
         <div class="ind-head">
-          <div><span class="label">${esc(h.label)} · ${a ? esc(avgLabel(a)) : `média de ${p.year}`}</span>
-            <div class="display num ind-value">${a ? esc(U.fmtKind(h.kind, a.v)) : '—'}</div>
-            ${lastVsAvg(h, a)}</div>
+          <div><div class="display num ind-value">${a ? esc(U.fmtKind(h.kind, a.v)) : '—'}</div></div>
           ${chips ? `<div class="ind-chips">${chips}</div>` : ''}
         </div>
         ${U.seriesChart(vm.chart, plotted, h.kind, { avg: a ? a.v : null })}
@@ -334,13 +316,12 @@
       ${pageHead(`Indicador / ${F.periodShort(p)}`, esc(b.title), b.group ? `Parte de ${esc(b.group)} · Painel de Bordo` : 'Painel de Bordo · aba Operações', `${indicatorPicker(ind, id)}${openSheet}`)}
       <section class="hero" aria-label="${esc(b.title)}">
         <div class="hero-main">
-          <div class="hero-foot"><span class="label label-strong">${esc(h.label)}</span><span class="label">${a ? esc(avgLabel(a)) : `Média de ${p.year}`}</span></div>
+          <div class="hero-foot"><span class="label label-strong">${esc(h.label)}</span></div>
           <div class="hero-figure"><span class="display num" style="font-size:clamp(56px,7vw,96px)">${a ? esc(U.fmtKind(h.kind, a.v)) : '—'}</span></div>
-          <div class="hero-foot">${lastVsAvg(h, a)}</div>
         </div>
         <div class="stats">
-          ${b.rows.filter((r) => r !== h).slice(0, 4).map((r) => { const v = average(b, r, am); return `<div class="stat"><div><span class="label">${esc(r.label)}</span><div class="hint">${v ? 'Média mensal' : '—'}</div></div><span class="value num" style="font-size:24px">${v ? esc(U.fmtKind(r.kind, v.v)) : '—'}</span></div>`; }).join('')}
-          ${b.meta || b.progress ? `<div class="stat"><div><span class="label">Meta</span><div class="hint">${b.progress ? `Progresso ${esc(b.progress)}` : 'Definida na planilha'}</div></div><span class="value" style="font-size:20px">${esc(b.meta || '—')}</span></div>` : ''}
+          ${b.rows.filter((r) => r !== h).slice(0, 4).map((r) => { const v = average(b, r, am); return `<div class="stat"><div><span class="label">${esc(r.label)}</span></div><span class="value num" style="font-size:24px">${v ? esc(U.fmtKind(r.kind, v.v)) : '—'}</span></div>`; }).join('')}
+          ${b.meta || b.progress ? `<div class="stat"><div><span class="label">Meta</span></div><span class="value" style="font-size:20px">${esc(b.meta || '—')}</span></div>` : ''}
         </div>
       </section>
 

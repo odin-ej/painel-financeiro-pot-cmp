@@ -78,10 +78,10 @@
         </div>
       </div>
       <div class="stats">
-        <div class="stat"><div><span class="label">Orçado</span><div class="hint">Planejado no POT</div></div><span class="value num">${U.moneyDisplay(m.planned)}</span></div>
-        <div class="stat"><div><span class="label">Realizado</span><div class="hint">Lançamentos do período</div></div><span class="value num">${U.moneyDisplay(m.realized)}</span></div>
-        <div class="stat"><div><span class="label">Disponível</span><div class="hint">Orçado − realizado</div></div><span class="value num">${U.moneyDisplay(m.available)}</span></div>
-        <div class="stat"><div><span class="label">Desvio</span><div class="hint">${esc(m.deviationLabel)}</div></div><span class="value num">${esc(F.signedMoney(m.devAbs))}</span></div>
+        <div class="stat"><div><span class="label">Orçado</span></div><span class="value num">${U.moneyDisplay(m.planned)}</span></div>
+        <div class="stat"><div><span class="label">Realizado</span></div><span class="value num">${U.moneyDisplay(m.realized)}</span></div>
+        <div class="stat"><div><span class="label">Disponível</span></div><span class="value num">${U.moneyDisplay(m.available)}</span></div>
+        <div class="stat"><div><span class="label">Desvio</span></div><span class="value num">${esc(F.signedMoney(m.devAbs))}</span></div>
       </div>
     </section>`;
   }
@@ -644,10 +644,10 @@
         `O POT de ${esc(F.periodRange(p))}: quanto cada centro planejou gastar, item por item, e como está a execução.`,
         `<a class="btn btn-primary" href="#/pot/construir">Construir orçamento <span class="arr">→</span></a><div class="seg" role="group" aria-label="Modo de visualização"><button data-mode="manager" aria-pressed="${mode === 'manager'}">Gerencial</button><button data-mode="detailed" aria-pressed="${mode === 'detailed'}">Detalhada</button></div>`)}
       <div class="stat-strip" style="margin-bottom:var(--s48)">
-        <div class="cell"><span class="label">Orçamento total</span><div class="value num">${U.moneyDisplay(t.planned)}</div><div class="hint">${a.items.length} itens planejados</div></div>
-        <div class="cell"><span class="label">Realizado</span><div class="value num">${U.moneyDisplay(t.realized)}</div><div class="hint">${a.txs.length} lançamentos</div></div>
-        <div class="cell"><span class="label">Saldo</span><div class="value num">${U.moneyDisplay(t.available)}</div><div class="hint">${esc(t.deviationLabel)}</div></div>
-        <div class="cell"><span class="label">Execução</span><div class="value num">${F.pct(t.pct)}</div><div class="hint">${esc(t.statusLabel)}</div></div>
+        <div class="cell"><span class="label">Orçamento total</span><div class="value num">${U.moneyDisplay(t.planned)}</div></div>
+        <div class="cell"><span class="label">Realizado</span><div class="value num">${U.moneyDisplay(t.realized)}</div></div>
+        <div class="cell"><span class="label">Saldo</span><div class="value num">${U.moneyDisplay(t.available)}</div></div>
+        <div class="cell"><span class="label">Execução</span><div class="value num">${F.pct(t.pct)}</div></div>
       </div>
       ${mode === 'manager' ? managerial : detailed}`;
 
@@ -813,12 +813,12 @@
         ${sectionHead('Resumo do mês', `<span id="sec-resumo">Visão geral de ${esc(nomeMes)}</span>`)}
         <div class="cmp-cover">
           <div class="cmp-summary">
-            <div class="cell"><span class="label">Orçado</span><div class="value num">${U.moneyDisplay(t.planned)}</div><div class="hint">${a.items.length} itens no POT</div></div>
-            <div class="cell"><span class="label">Realizado</span><div class="value num">${U.moneyDisplay(t.realized)}</div><div class="hint">${a.txs.length} lançamentos</div></div>
-            <div class="cell"><span class="label">Diferença</span><div class="value num">${U.moneyDisplay(Math.abs(t.devAbs))}</div><div class="hint">${t.devAbs <= 0 ? 'Abaixo do orçamento' : 'Acima do orçamento'}</div></div>
-            <div class="cell"><span class="label">Execução</span><div class="value num">${F.pct(t.pct)}</div><div class="hint">${esc(t.statusLabel)}</div></div>
-            <div class="cell"><span class="label">Entradas</span><div class="value num">${income === null ? '—' : U.moneyDisplay(income)}</div>${income === null ? '<div class="pending-int">Sem entradas registradas na planilha de indicadores para este mês.</div>' : '<div class="hint">Indicadores › Resultado de Caixa</div>'}</div>
-            <div class="cell"><span class="label">Resultado mensal</span><div class="value num ${result !== null && result < 0 ? 'tone-over' : ''}">${result === null ? '—' : esc(F.signedMoney(result))}</div><div class="hint">${result === null ? 'Aguardando entradas' : result < 0 ? 'Entradas menores que os gastos' : 'Entradas superaram os gastos'}</div></div>
+            <div class="cell"><span class="label">Orçado</span><div class="value num">${U.moneyDisplay(t.planned)}</div></div>
+            <div class="cell"><span class="label">Realizado</span><div class="value num">${U.moneyDisplay(t.realized)}</div></div>
+            <div class="cell"><span class="label">Diferença</span><div class="value num">${U.moneyDisplay(Math.abs(t.devAbs))}</div></div>
+            <div class="cell"><span class="label">Execução</span><div class="value num">${F.pct(t.pct)}</div></div>
+            <div class="cell"><span class="label">Entradas</span><div class="value num">${income === null ? '—' : U.moneyDisplay(income)}</div></div>
+            <div class="cell"><span class="label">Resultado mensal</span><div class="value num ${result !== null && result < 0 ? 'tone-over' : ''}">${result === null ? '—' : esc(F.signedMoney(result))}</div></div>
           </div>
           <div class="inverted" style="display:flex;flex-direction:column;justify-content:space-between;gap:24px">
             <span class="label">Síntese</span>
@@ -856,12 +856,12 @@
       <section class="section" aria-labelledby="sec-panorama">
         ${sectionHead('Panorama geral', '<span id="sec-panorama">O mês em seis leituras</span>')}
         <div class="insights">
-          <div class="insight"><span class="label">Gasto total</span><span class="big num">${F.money(t.realized, true)}</span><span class="s">${F.pct(t.pct)} do orçamento de ${F.money(t.planned, true)}</span></div>
-          <div class="insight"><span class="label">Diferença contra o planejamento</span><span class="big num">${esc(F.signedMoney(t.devAbs, true))}</span><span class="s">${esc(t.deviationLabel)} (${esc(F.signedPct(t.devPct))})</span></div>
-          <a class="insight" href="#/centros/${pan.maior.id}" data-setmonth><span class="label">Centro com maior gasto</span><span class="big">${esc(pan.maior.name)}</span><span class="s">${F.money(pan.maior.realized)} · ${F.pct((pan.maior.realized / t.realized) * 100)} do total</span></a>
-          <a class="insight" href="#/centros/${pan.desvio.id}" data-setmonth><span class="label">Centro com maior desvio</span><span class="big">${esc(pan.desvio.name)}</span><span class="s">${esc(F.signedMoney(pan.desvio.devAbs))} · ${esc(pan.desvio.deviationLabel.toLowerCase())}</span></a>
-          <a class="insight" href="#/centros/${pan.menor.id}" data-setmonth><span class="label">Centro com menor execução</span><span class="big">${esc(pan.menor.name)}</span><span class="s">${F.pct(pan.menor.pct)} executado · ${F.money(pan.menor.available)} disponíveis</span></a>
-          <div class="insight"><span class="label">Categorias acima do orçamento</span><span class="big num">${pan.acima.length}</span><span class="s">${pan.acima.length ? pan.acima.slice(0, 4).map((x) => esc(x.name)).join(', ') + (pan.acima.length > 4 ? '…' : '') : 'Nenhuma categoria acima do previsto.'}</span></div>
+          <div class="insight"><span class="label">Gasto total</span><span class="big num">${F.money(t.realized, true)}</span></div>
+          <div class="insight"><span class="label">Diferença contra o planejamento</span><span class="big num">${esc(F.signedMoney(t.devAbs, true))}</span></div>
+          <a class="insight" href="#/centros/${pan.maior.id}" data-setmonth><span class="label">Centro com maior gasto</span><span class="big">${esc(pan.maior.name)}</span></a>
+          <a class="insight" href="#/centros/${pan.desvio.id}" data-setmonth><span class="label">Centro com maior desvio</span><span class="big">${esc(pan.desvio.name)}</span></a>
+          <a class="insight" href="#/centros/${pan.menor.id}" data-setmonth><span class="label">Centro com menor execução</span><span class="big">${esc(pan.menor.name)}</span></a>
+          <div class="insight"><span class="label">Categorias acima do orçamento</span><span class="big num">${pan.acima.length}</span></div>
         </div>
       </section>
 

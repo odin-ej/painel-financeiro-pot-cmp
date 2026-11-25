@@ -995,3 +995,55 @@ a.insight:hover { background: rgba(63, 64, 65, 0.25); }
 .ind-strip.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .ind-grid.single { grid-template-columns: 1fr; }
 @media (max-width: 760px) { .ind-strip.n3 { grid-template-columns: 1fr 1fr; } }
+
+/* ------------------------------------------------------------------ */
+/* Lista suspensa própria (ui.js › enhanceSelect)                      */
+/* O <select> nativo fica escondido; o botão .dd-btn assume o visual.  */
+/* ------------------------------------------------------------------ */
+.select.dd-native { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; padding: 0; border: 0; }
+.field:has(.dd-native) > .chev { display: none; }
+.dd-btn {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 36px; padding: 0 12px 0 14px; max-width: 100%;
+  border-radius: var(--r-input); border: 1px solid var(--hairline-strong); background: var(--abyss);
+  color: var(--cloud); font-size: 13px; text-align: left; white-space: nowrap;
+  transition: border-color var(--ease), background var(--ease);
+}
+.dd-btn:hover:not(:disabled), .dd-btn[aria-expanded='true'] { border-color: rgba(255, 255, 255, 0.24); background: var(--obsidian); }
+.dd-btn:disabled { opacity: 0.45; cursor: default; }
+.dd-val { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dd-chev { width: 12px; height: 12px; flex: none; stroke: var(--fog); fill: none; stroke-width: 1.6; transition: transform var(--ease); }
+.dd-btn[aria-expanded='true'] .dd-chev { transform: rotate(180deg); }
+.dd-mono { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.dd-sm { min-height: 32px; padding: 0 8px 0 10px; font-size: 12px; width: 100%; }
+.select.invalid + .dd-btn { border-color: var(--over); }
+
+.dd-pop {
+  position: fixed; z-index: 200; max-width: min(420px, calc(100vw - 32px));
+  display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 12px; background: var(--obsidian); border: 1px solid var(--hairline-strong);
+  animation: dd-in 120ms ease-out;
+}
+.dd-pop.up { animation-name: dd-in-up; }
+@keyframes dd-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes dd-in-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.dd-search { padding: 8px; border-bottom: 1px solid var(--hairline); }
+.dd-search input { width: 100%; background: var(--abyss); border: 1px solid var(--hairline); border-radius: 7px; color: var(--cloud); padding: 7px 10px; font-size: 13px; }
+.dd-search input:focus { outline: none; border-color: rgba(255, 255, 255, 0.3); }
+.dd-list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
+.dd-opt {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 9px 10px; border-radius: 7px; text-align: left;
+  color: var(--silver); font: inherit; font-size: 13px; white-space: nowrap;
+  transition: background var(--ease), color var(--ease);
+}
+.dd-mono .dd-opt { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.dd-opt:hover, .dd-opt:focus-visible { background: rgba(255, 255, 255, 0.06); color: var(--cloud); outline: none; }
+.dd-opt[aria-selected='true'] { color: var(--pure); background: rgba(0, 179, 221, 0.1); }
+.dd-opt[hidden] { display: none; }
+.dd-opt:disabled { opacity: 0.35; }
+.dd-check { width: 14px; height: 14px; flex: none; stroke: var(--cyan-signal); fill: none; stroke-width: 2; visibility: hidden; }
+.dd-opt[aria-selected='true'] .dd-check { visibility: visible; }
+
+/* Sem a linha de apoio, os cards do Panorama não precisam de altura mínima */
+.insight { min-height: 0; }

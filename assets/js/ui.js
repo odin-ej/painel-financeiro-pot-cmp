@@ -125,6 +125,148 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Lista suspensa própria (substitui o visual do <select> nativo)     */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * Todo <select class="select"> que entra na página é "aprimorado": o select
+   * nativo continua no DOM (escondido) como fonte da verdade — formulários,
+   * FormData e os listeners de 'change' das páginas seguem funcionando — e um
+   * botão + painel próprios assumem o visual e a interação.
+   * NOTA: a lista abre num painel fixo no <body> para não ser cortada por
+   * tabelas com rolagem ou modais com overflow.
+   */
+  const DD_SEARCH_MIN = 10; // a partir de 10 opções, mostra campo de busca
+  let ddOpen = null; // { sel, btn, pop }
+
+  /** Texto do botão: rótulo da opção selecionada. */
+  function ddLabel(sel) {
+    const o = sel.options[sel.selectedIndex];
+    return o ? o.textContent : '';
+  }
+
+  /** Transforma um <select> nativo em lista suspensa própria (idempotente). */
+  function enhanceSelect(sel) {
+    if (sel.dataset.dd) return;
+    sel.dataset.dd = '1';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dd-btn' + (sel.classList.contains('select-mono') ? ' dd-mono' : '') + (sel.classList.contains('sm') ? ' dd-sm' : '');
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    const aria = sel.getAttribute('aria-label') || (sel.closest('label') && sel.closest('label').textContent.trim());
+    if (aria) btn.setAttribute('aria-label', aria);
+    if (sel.style.cssText) btn.style.cssText = sel.style.cssText;
+    btn.innerHTML = `<span class="dd-val"></span>${icon('down', 'dd-chev')}`;
+    const refresh = () => {
+      btn.querySelector('.dd-val').textContent = ddLabel(sel);
+      btn.disabled = sel.disabled;
+    };
+    refresh();
+    sel.classList.add('dd-native');
+    sel.tabIndex = -1;
+    sel.setAttribute('aria-hidden', 'true');
+    sel.after(btn);
+    // Mantém o botão em dia quando o código altera value/selectedIndex diretamente
+    ['value', 'selectedIndex'].forEach((prop) => {
+      const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, prop);
+      Object.defineProperty(sel, prop, { configurable: true, get() { return d.get.call(this); }, set(v) { d.set.call(this, v); refresh(); } });
+    });
+    sel.addEventListener('change', refresh);
+    sel.addEventListener('focus', () => btn.focus()); // clique no <label> leva ao botão
+    sel._ddRefresh = refresh;
+    btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); ddOpen && ddOpen.sel === sel ? ddClose(true) : ddOpenFor(sel, btn); });
+    btn.addEventListener('keydown', (e) => {
+      if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); if (!ddOpen) ddOpenFor(sel, btn); }
+    });
+  }
+
+  /** Abre o painel de opções sob (ou sobre, se faltar espaço) o botão. */
+  function ddOpenFor(sel, btn) {
+    ddClose(false);
+    if (sel.disabled) return;
+    sel._ddRefresh();
+    const opts = [...sel.options];
+    const mono = btn.classList.contains('dd-mono');
+    const pop = document.createElement('div');
+    pop.className = 'dd-pop' + (mono ? ' dd-mono' : '');
+    pop.innerHTML = `${opts.length >= DD_SEARCH_MIN ? '<div class="dd-search"><input type="text" placeholder="Buscar…" aria-label="Buscar opção"></div>' : ''}
+      <div class="dd-list" role="listbox">${opts.map((o, i) => `<button type="button" role="option" class="dd-opt" data-i="${i}" aria-selected="${i === sel.selectedIndex}"${o.disabled ? ' disabled' : ''}><span>${esc(o.textContent)}</span>${icon('check', 'dd-check')}</button>`).join('')}</div>`;
+    document.body.appendChild(pop);
+    // Posicionamento: largura mínima do botão; abre para cima se não couber embaixo
+    const r = btn.getBoundingClientRect();
+    const w = Math.min(Math.max(r.width, 200), window.innerWidth - 32);
+    pop.style.minWidth = w + 'px';
+    const left = Math.min(Math.max(16, r.left), window.innerWidth - pop.offsetWidth - 16);
+    pop.style.left = left + 'px';
+    const below = window.innerHeight - r.bottom - 16;
+    if (below < Math.min(pop.offsetHeight, 240) && r.top > below) { pop.style.bottom = (window.innerHeight - r.top + 6) + 'px'; pop.classList.add('up'); }
+    else pop.style.top = (r.bottom + 6) + 'px';
+    pop.style.maxHeight = Math.max(160, (pop.classList.contains('up') ? r.top : below) - 12) + 'px';
+    btn.setAttribute('aria-expanded', 'true');
+    ddOpen = { sel, btn, pop };
+
+    const items = () => [...pop.querySelectorAll('.dd-opt:not([disabled]):not([hidden])')];
+    const cur = pop.querySelector('.dd-opt[aria-selected="true"]') || items()[0];
+    if (cur) cur.scrollIntoView({ block: 'nearest' });
+    const input = pop.querySelector('.dd-search input');
+    (input || cur || pop).focus();
+
+    pop.addEventListener('click', (e) => {
+      const o = e.target.closest('.dd-opt');
+      if (!o || o.disabled) return;
+      const i = Number(o.dataset.i);
+      ddClose(true);
+      if (i !== sel.selectedIndex) {
+        sel.selectedIndex = i;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    pop.addEventListener('keydown', (e) => {
+      const list = items();
+      const i = list.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); (list[i + 1] || list[0]).focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); (i > 0 ? list[i - 1] : input || list[list.length - 1]).focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); ddClose(true); }
+      else if (e.key === 'Tab') ddClose(false);
+      else if (e.key === 'Enter' && document.activeElement === input && list[0]) { e.preventDefault(); list[0].click(); }
+    });
+    if (input) input.addEventListener('input', () => {
+      // Busca sem acento/maiúsculas: "inovacao" encontra "Inovação"
+      const nrm = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+      const q = nrm(input.value);
+      pop.querySelectorAll('.dd-opt').forEach((o) => { o.hidden = !!q && !nrm(o.textContent).includes(q); });
+    });
+  }
+
+  /** Fecha o painel aberto (opcionalmente devolvendo o foco ao botão). */
+  function ddClose(focusBtn) {
+    if (!ddOpen) return;
+    const { btn, pop } = ddOpen;
+    ddOpen = null;
+    pop.remove();
+    btn.setAttribute('aria-expanded', 'false');
+    if (focusBtn && btn.isConnected) btn.focus();
+  }
+
+  /** Aprimora os selects existentes e os que forem inseridos depois (páginas, modais, tabelas). */
+  function initSelects() {
+    const run = (root) => root.querySelectorAll && root.querySelectorAll('select.select').forEach(enhanceSelect);
+    run(document);
+    let queued = false;
+    new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => { queued = false; run(document); });
+    }).observe(document.body, { childList: true, subtree: true });
+    document.addEventListener('mousedown', (e) => { if (ddOpen && !ddOpen.pop.contains(e.target) && !ddOpen.btn.contains(e.target)) ddClose(false); });
+    // Rolagem da página/rolagem de tabela desloca o botão: fecha em vez de deixar o painel solto
+    window.addEventListener('scroll', (e) => { if (ddOpen && !ddOpen.pop.contains(e.target)) ddClose(false); }, true);
+    window.addEventListener('resize', () => ddClose(false));
+    window.addEventListener('hashchange', () => ddClose(false));
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Tooltip global                                                      */
   /* ------------------------------------------------------------------ */
   let tipEl;
@@ -569,6 +711,8 @@
       show(i, r.left + (i / n) * r.width, r.top + 20);
     });
   }
+
+  initSelects();
 
   window.UI = {
     icon, toneIcon, badge, bar, moneyDisplay, pctDisplay, deltaText, select,
