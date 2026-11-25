@@ -9,7 +9,8 @@
  *  - classificação de status financeiro e geração de alertas/insights;
  *  - armazenamento local das análises mensais da CMP.
  *
- * Dependências: window.POT_DATA (assets/data.js). Nenhuma biblioteca externa.
+ * Dependências: nenhuma biblioteca externa. Os dados chegam via Fin.init(data),
+ * chamado pelo app.js com o resultado de Sheets.load() (Google Sheets ao vivo).
  *
  * NOTA: todas as somas são feitas em centavos inteiros para que
  * "centro = soma das categorias" e "categoria = soma dos lançamentos"
@@ -18,7 +19,8 @@
 (function () {
   'use strict';
 
-  const D = window.POT_DATA;
+  // Dataset vigente. Substituído por init() a cada leitura da planilha.
+  let D = { meta: { year: new Date().getFullYear(), currentQuarter: 1, lastClosedMonth: '', maxMonth: '' }, centers: [], categories: [], items: [], transactions: [], incomes: [], analyses: [], catalog: [] };
 
   /* ------------------------------------------------------------------ */
   /* Formatação                                                          */
@@ -96,14 +98,29 @@
   /* Índices                                                             */
   /* ------------------------------------------------------------------ */
 
-  const centers = D.centers.slice().sort((a, b) => a.order - b.order);
-  const centerById = Object.fromEntries(centers.map((c) => [c.id, c]));
-  const catById = Object.fromEntries(D.categories.map((c) => [c.id, c]));
-  const itemById = Object.fromEntries(D.items.map((i) => [i.id, i]));
+  let centers = [], centerById = {}, catById = {}, itemById = {};
+  /** Meses com dados no dataset (ex.: "2025-01" ... "2026-12"), em ordem. */
+  let dataMonths = [];
+  /** Último mês considerado "corrente" (teto do acumulado do ano). */
+  let lastMonth = '';
 
-  /** Meses com dados no dataset (ex.: "2026-01" ... "2026-09"), em ordem. */
-  const dataMonths = Array.from(new Set(D.items.map((i) => i.month))).sort();
-  const lastMonth = D.meta.lastClosedMonth;
+  /**
+   * Carrega um novo dataset e reconstrói os índices.
+   * Também atualiza as propriedades públicas de window.Fin, que as telas
+   * leem a cada renderização.
+   * @param {Object} data - saída de Sheets.load().data
+   */
+  function init(data) {
+    D = data;
+    centers = D.centers.slice().sort((a, b) => a.order - b.order);
+    centerById = Object.fromEntries(centers.map((c) => [c.id, c]));
+    catById = Object.fromEntries(D.categories.map((c) => [c.id, c]));
+    itemById = Object.fromEntries(D.items.map((i) => [i.id, i]));
+    dataMonths = Array.from(new Set(D.items.map((i) => i.month).concat(D.transactions.map((t) => t.date.slice(0, 7))))).sort();
+    lastMonth = D.meta.lastClosedMonth || dataMonths[dataMonths.length - 1] || '';
+    cache = {};
+    Object.assign(window.Fin, { D, centers, centerById, catById, itemById, dataMonths, lastMonth });
+  }
 
   /* ------------------------------------------------------------------ */
   /* Períodos                                                            */
@@ -168,13 +185,20 @@
     return p.kind === 'month' ? 'mês anterior' : p.kind === 'quarter' ? 'trimestre anterior' : 'ano anterior';
   }
 
-  /** Opções disponíveis no seletor global, por tipo. */
+  /**
+   * Opções do seletor global, por tipo, cobrindo todos os anos da planilha.
+   * Meses futuros com planejamento (ex.: dezembro) também são selecionáveis.
+   * Ordem: mais recente primeiro.
+   */
   function periodOptions(kind) {
-    const y = D.meta.year;
-    const lastM = Number(lastMonth.slice(5));
-    if (kind === 'month') return Array.from({ length: lastM }, (_, i) => ({ kind: 'month', year: y, month: i + 1 }));
-    if (kind === 'quarter') return Array.from({ length: Math.ceil(lastM / 3) }, (_, i) => ({ kind: 'quarter', year: y, quarter: i + 1 }));
-    return [{ kind: 'year', year: y }];
+    const ms = dataMonths.slice().reverse();
+    if (kind === 'month') return ms.map((m) => ({ kind: 'month', year: Number(m.slice(0, 4)), month: Number(m.slice(5)) }));
+    if (kind === 'quarter') {
+      const seen = new Set();
+      return ms.map((m) => ({ kind: 'quarter', year: Number(m.slice(0, 4)), quarter: Math.ceil(Number(m.slice(5)) / 3) }))
+        .filter((q) => { const k = `${q.year}-${q.quarter}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    }
+    return [...new Set(ms.map((m) => Number(m.slice(0, 4))))].map((year) => ({ kind: 'year', year }));
   }
 
   /** Serializa/desserializa período para URL/armazenamento: "m-2026-8", "q-2026-3", "y-2026". */
@@ -358,9 +382,8 @@
   /**
    * Série acumulada Planejado × Realizado para o gráfico de evolução.
    *
-   * O orçado de cada mês é distribuído linearmente ao longo dos dias do mês
-   * (ritmo ideal de consumo); o realizado acumula na data de cada lançamento.
-   * Granularidade semanal para mês/trimestre, mensal para o acumulado do ano.
+   * Granularidade mensal (a da planilha): orçado e realizado acumulados ao
+   * fim de cada mês do período.
    *
    * @param {Period} p
    * @param {{centerId?:string, categoryId?:string}} filtro
@@ -387,29 +410,14 @@
     };
     const cumRealAt = (iso) => txs.reduce((s, t) => (t.date <= iso ? s + toC(t.amount) : s), 0);
 
-    if (p.kind === 'year') {
-      months.forEach((m) => {
-        const end = `${m}-${String(daysIn(m)).padStart(2, '0')}`;
-        pontos.push({ label: MESES_CURTOS[Number(m.slice(5)) - 1], date: end, planned: fromC(Math.round(cumPlannedAt(end))), realized: fromC(cumRealAt(end)) });
-      });
-    } else {
-      // Pontos a cada 7 dias + fim de cada mês, iniciando em zero no primeiro dia.
-      const first = `${months[0]}-01`;
-      const lastM = months[months.length - 1];
-      const last = `${lastM}-${String(daysIn(lastM)).padStart(2, '0')}`;
-      pontos.push({ label: '', date: first, planned: 0, realized: 0, start: true });
-      const d = new Date(first + 'T12:00:00');
-      const datas = new Set();
-      for (let x = new Date(d); ; x.setDate(x.getDate() + 7)) {
-        const iso = x.toISOString().slice(0, 10);
-        if (iso > last) break;
-        if (iso !== first) datas.add(iso);
-      }
-      months.forEach((m) => datas.add(`${m}-${String(daysIn(m)).padStart(2, '0')}`));
-      [...datas].sort().forEach((iso) => {
-        pontos.push({ label: `${iso.slice(8)}/${iso.slice(5, 7)}`, date: iso, planned: fromC(Math.round(cumPlannedAt(iso))), realized: fromC(cumRealAt(iso)), monthEnd: iso.slice(8) === String(daysIn(iso.slice(0, 7))) });
-      });
-    }
+    // A planilha registra valores por mês (data = dia 1), então a evolução é
+    // mensal: ponto zero no início do período e um ponto ao fim de cada mês.
+    if (!months.length) return pontos;
+    pontos.push({ label: '', date: `${months[0]}-01`, planned: 0, realized: 0, start: true });
+    months.forEach((m) => {
+      const end = `${m}-${String(daysIn(m)).padStart(2, '0')}`;
+      pontos.push({ label: MESES_CURTOS[Number(m.slice(5)) - 1], date: end, planned: fromC(Math.round(cumPlannedAt(end))), realized: fromC(cumRealAt(end)), monthEnd: true });
+    });
     return pontos;
   }
 
@@ -569,38 +577,17 @@
     try { localStorage.setItem(STORE_KEY, JSON.stringify(all)); } catch (e) { /* armazenamento indisponível: mantém só em memória */ }
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Lançamento manual (sessão)                                          */
-  /* ------------------------------------------------------------------ */
-
-  /**
-   * Adiciona um lançamento ao dataset em memória (protótipo: não persiste).
-   * Invalida o cache para que todas as telas reflitam o novo valor.
-   * @param {{date:string, description:string, categoryId:string, amount:number, itemId?:string, note?:string}} t
-   */
-  function addTransaction(t) {
-    const seq = D.transactions.length + 1;
-    const cat = catById[t.categoryId];
-    D.transactions.push({
-      id: `LC-NOVO-${String(seq).padStart(4, '0')}`, date: t.date, description: t.description,
-      categoryId: t.categoryId, itemId: t.itemId || null, amount: Math.round(t.amount * 100) / 100,
-      type: t.type || 'Variável', status: 'Pendente', note: t.note || 'Lançamento criado no protótipo (não persistido).',
-      source: 'Manual', responsible: centerById[cat.centerId].owner,
-    });
-    cache = {};
-  }
-
-  /** Receita (entradas) do mês, ou null quando não houver dado — preparado para integração futura. */
+  /** Entradas do mês (planilha de indicadores › Resultado de Caixa), ou null quando não houver dado. */
   function incomeFor(month) {
     const x = D.incomes.find((i) => i.month === month);
     return x ? x.amount : null;
   }
 
   window.Fin = {
-    D, centers, centerById, catById, itemById, dataMonths, lastMonth, MESES, MESES_CURTOS, LIMIARES, STATUS,
+    init, D, centers, centerById, catById, itemById, dataMonths, lastMonth, MESES, MESES_CURTOS, LIMIARES, STATUS,
     money, pct, signedPct, signedMoney, date, monthLabel, esc, norm,
     periodMonths, periodLabel, periodShort, periodRange, prevPeriod, prevLabel, periodOptions, periodKey, parsePeriodKey,
     metrics, aggregate, transactionsFor, itemsFor, unbudgetedTx, sortCenters, sortCategories, evolution, comparePrev,
-    alerts, topCategories, topSpending, panorama, draftAnalysis, getAnalysis, saveAnalysis, addTransaction, incomeFor,
+    alerts, topCategories, topSpending, panorama, draftAnalysis, getAnalysis, saveAnalysis, incomeFor,
   };
 })();

@@ -1,10 +1,30 @@
 # Painel Financeiro — POT + CMP (Empresa JR ADM UFBA)
 
-Protótipo navegável que unifica o **POT** (Planejamento Orçamentário Trimestral) e a **CMP** (Carta Mensal de Planejamento) em uma única plataforma: dados → dashboard → análise → decisão.
+Painel que unifica o **POT** (Planejamento Orçamentário Trimestral), a **CMP** (Carta Mensal de Planejamento) e os **indicadores financeiros**, conectado ao vivo às planilhas Google da empresa.
 
-## Como abrir
+Publicado em https://odin-ej.github.io/painel-financeiro-pot-cmp/
 
-O app é HTML/CSS/JS puro, sem build. Sirva a pasta com qualquer servidor estático:
+## Como os dados chegam
+
+O painel não guarda dados próprios. A cada acesso (e a cada 5 minutos com a aba aberta) o navegador lê:
+
+| Fonte | Aba | Uso no painel |
+|---|---|---|
+| Planilha do POT | `[GERAL]` | Planejado × realizado: Visão Geral, Centros, POT, CMP, Lançamentos |
+| Planilha do POT | `[Lista de Categorias]` | Categorias e custeio no construtor do orçamento |
+| Planilha de indicadores | Operações, abaixo de "Outros Indicadores" | Aba Indicadores e as entradas do mês na CMP |
+
+As planilhas precisam estar compartilhadas como **"Qualquer pessoa com o link — Leitor"**. Os IDs ficam em [assets/js/config.js](assets/js/config.js).
+
+Se o Google estiver indisponível, o painel mostra a última leitura salva no navegador e avisa isso na barra lateral.
+
+## Escrita na planilha
+
+Construir o POT pelo painel, editar/excluir itens e salvar análises da CMP passam por um Google Apps Script instalado na planilha do POT, protegido por uma chave de acesso. Instalação: [apps-script/README.md](apps-script/README.md).
+
+Sem o Apps Script, o painel funciona normalmente em modo leitura; o construtor guarda o rascunho no navegador.
+
+## Rodar localmente
 
 ```bash
 python -m http.server 5173
@@ -16,31 +36,18 @@ Depois acesse http://localhost:5173.
 
 | Arquivo | Papel |
 |---|---|
-| `assets/data.js` | **Fonte única de dados** (gerada — não editar à mão) |
-| `tools/gerar_dados.py` | Gera `data.js` de forma determinística; agosto/2026 reproduz a CMP real |
+| `assets/js/config.js` | IDs das planilhas, URL do Apps Script, mapeamento dos centros |
+| `assets/js/sheets.js` | Leitura das planilhas, parser dos indicadores, envio ao Apps Script |
 | `assets/js/core.js` | Regras financeiras: períodos, agregações, status, alertas, insights |
-| `assets/js/ui.js` | Componentes (badges, barras, drawer, modal, tooltip) e gráficos SVG |
-| `assets/js/pages.js` | Telas: Visão Geral, Centros, POT, CMP, Lançamentos |
-| `assets/js/app.js` | Roteamento por hash, estado global, seletor de período |
-| `assets/css/styles.css` | Design system derivado do `DESIGN.md` |
+| `assets/js/ui.js` | Componentes e gráficos SVG |
+| `assets/js/pages.js` | Visão Geral, Centros, POT, CMP, Lançamentos, drawers |
+| `assets/js/pages-planilha.js` | Indicadores, Construir orçamento, Configurações |
+| `assets/js/app.js` | Carga, atualização automática, rotas, seletor de período |
+| `apps-script/Codigo.gs` | API de escrita (colar no Apps Script da planilha do POT) |
 
-## Consistência
+## Regras de leitura da `[GERAL]`
 
-Todas as somas são feitas em centavos inteiros: lançamentos → categoria → centro → total.
-Nenhum número da interface é digitado manualmente; tudo é derivado de `data.js`.
-
-## Cenários de demonstração (Q3 2026)
-
-- Institucional acima de 100% (ENEJ)
-- Projetos (91,8%) e Operação (86,9%) entre 80–100%
-- Inovação abaixo de 50%
-- Categorias acima do orçamento (ENEJ, Alimentação e deslocamento)
-- Gastos não orçados (Foto institucional, Devoluções)
-- Categoria sem movimentação (Experimentos e validações)
-- TotalPass com orçamento totalmente utilizado
-
-## Limitações do protótipo
-
-- Análises da CMP e preferências ficam no `localStorage` do navegador.
-- "Novo lançamento" vale apenas para a sessão.
-- Geração por IA, integrações (VExpenses, Conta Azul), autenticação e exportação estão sinalizadas como futuras.
+- Cada linha com Valor Planejado vira um item do POT; cada linha com Valor Realizado vira um lançamento.
+- Linha com realizado e sem planejado = **gasto não orçado**.
+- O centro "Pessoas" da planilha aparece como **Cultural** no painel.
+- Todo número do painel leva até a linha de origem na planilha (link nos detalhes do item e do lançamento).

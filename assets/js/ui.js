@@ -40,6 +40,11 @@
     spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
     edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
     sort: '<path d="M8 4v16M8 20l-3-3M8 20l3-3M16 20V4M16 4l-3 3M16 4l3 3"/>',
+    chart: '<path d="M4 20V11M10 20V5M16 20v-7M21 20H3"/>',
+    refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+    external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v6H4V6h6"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>',
   };
 
   /**
@@ -455,9 +460,115 @@
     hit.addEventListener('blur', () => { el.classList.remove('active'); tipHide(); });
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Séries de indicadores                                               */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Formata um valor de indicador conforme o tipo exibido na planilha.
+   * @param {'money'|'pct'|'num'} kind
+   * @param {number|null} v
+   * @param {boolean} [short] - versão compacta para eixos
+   */
+  function fmtKind(kind, v, short) {
+    if (v === null || !Number.isFinite(v)) return '—';
+    if (kind === 'money') return short ? (v < 0 ? '−' : '') + axisLabel(Math.abs(v)) : F.money(v);
+    if (kind === 'pct') return F.pct(v);
+    return v.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  }
+
+  const SERIES_COLORS = ['#00b3dd', '#f5f5f7', '#6a6b6b', '#9f9fa0'];
+
+  /**
+   * Gráfico de linhas para indicadores mensais. Suporta valores negativos
+   * (linha de zero destacada) e meses sem dado (a linha é interrompida).
+   * @param {string[]} months - "AAAA-MM"
+   * @param {Array<{name:string, values:(number|null)[]}>} series - mesmo tipo de unidade
+   * @param {'money'|'pct'|'num'} kind
+   * @returns {string} HTML (interações via mountSeries)
+   */
+  function seriesChart(months, series, kind) {
+    const all = series.flatMap((s) => s.values.filter((v) => v !== null));
+    if (!all.length) return '<div class="empty">Sem valores preenchidos ainda.</div>';
+    const hi = Math.max(0, ...all), lo = Math.min(0, ...all);
+    const top = hi > 0 ? niceMax(hi) : 0;
+    const bot = lo < 0 ? -niceMax(-lo) : 0;
+    const span = top - bot || 1;
+    const n = months.length - 1 || 1;
+    const x = (i) => (i / n) * 1000;
+    const y = (v) => 300 - ((v - bot) / span) * 300;
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => bot + span * t);
+    const grid = ticks.map((v) => `<div class="gl${Math.abs(v) < 1e-9 && bot < 0 ? ' zero' : ''}" style="top:${(1 - (v - bot) / span) * 100}%"><span>${fmtKind(kind, v, true)}</span></div>`).join('');
+    const paths = series.map((s, k) => {
+      let d = '', pen = false;
+      s.values.forEach((v, i) => {
+        if (v === null) { pen = false; return; }
+        d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+        pen = true;
+      });
+      return `<path d="${d}" fill="none" stroke="${SERIES_COLORS[k % SERIES_COLORS.length]}" stroke-width="${k === 0 ? 2 : 1.5}"${k > 0 ? ' stroke-dasharray="5 4"' : ''} vector-effect="non-scaling-stroke"/>`;
+    }).join('');
+    const xl = months.map((m, i) => `<span class="xl" style="left:${(i / n) * 100}%">${F.MESES_CURTOS[Number(m.slice(5)) - 1]}</span>`).join('');
+    const dots = series.map((s, k) => `<div class="dot" data-k="${k}" style="background:${SERIES_COLORS[k % SERIES_COLORS.length]}"></div>`).join('');
+    return `<div class="line-chart series-chart" data-series>
+      ${grid}
+      <svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">${paths}</svg>
+      ${xl}<div class="guide"></div>${dots}
+      <div class="hit" tabindex="0" role="img" aria-label="${esc(series.map((s) => s.name).join(', '))} por mês"></div>
+    </div>`;
+  }
+
+  /**
+   * Liga hover/teclado do gráfico de indicadores. O tooltip mostra todas as
+   * linhas do bloco no mês (inclusive as que não estão desenhadas).
+   * @param {HTMLElement} el - contêiner que contém [data-series]
+   * @param {string[]} months
+   * @param {Array} plotted - séries desenhadas (para posicionar os pontos)
+   * @param {string} kind
+   * @param {Array<{label:string, kind:string, values:(number|null)[]}>} rows - todas as linhas do bloco
+   */
+  function mountSeries(el, months, plotted, kind, rows) {
+    const ch = el.querySelector('[data-series]');
+    if (!ch) return;
+    const all = plotted.flatMap((s) => s.values.filter((v) => v !== null));
+    const hi = Math.max(0, ...all), lo = Math.min(0, ...all);
+    const top = hi > 0 ? niceMax(hi) : 0, bot = lo < 0 ? -niceMax(-lo) : 0, span = top - bot || 1;
+    const n = months.length - 1 || 1;
+    const guide = ch.querySelector('.guide');
+    const dots = ch.querySelectorAll('.dot');
+    const hit = ch.querySelector('.hit');
+    let cur = months.length - 1;
+    const show = (i, cx, cy) => {
+      cur = i;
+      const left = (i / n) * 100;
+      guide.style.left = left + '%';
+      dots.forEach((d) => {
+        const v = plotted[Number(d.dataset.k)].values[i];
+        d.style.display = v === null ? 'none' : '';
+        d.style.left = left + '%';
+        if (v !== null) d.style.top = (1 - (v - bot) / span) * 100 + '%';
+      });
+      ch.classList.add('active');
+      tipShow(`<div class="tt">${esc(F.monthLabel(months[i]))}</div>${rows.map((r) => `<div class="tr">${esc(r.label)} <b>${esc(fmtKind(r.kind, r.values[i]))}</b></div>`).join('')}`, cx, cy);
+    };
+    hit.addEventListener('mousemove', (e) => {
+      const r = hit.getBoundingClientRect();
+      show(Math.min(months.length - 1, Math.max(0, Math.round(((e.clientX - r.left) / r.width) * n))), e.clientX, e.clientY);
+    });
+    hit.addEventListener('mouseleave', () => { ch.classList.remove('active'); tipHide(); });
+    hit.addEventListener('blur', () => { ch.classList.remove('active'); tipHide(); });
+    hit.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const i = Math.min(months.length - 1, Math.max(0, cur + (e.key === 'ArrowRight' ? 1 : -1)));
+      const r = hit.getBoundingClientRect();
+      show(i, r.left + (i / n) * r.width, r.top + 20);
+    });
+  }
+
   window.UI = {
     icon, toneIcon, badge, bar, moneyDisplay, pctDisplay, deltaText, select,
     tipShow, tipHide, tipFin, openDrawer, closeDrawer, openModal, closeModal, toast,
-    barsChart, donut, mountDonut, lineChart, mountLine, niceMax,
+    barsChart, donut, mountDonut, lineChart, mountLine, niceMax, fmtKind, seriesChart, mountSeries, SERIES_COLORS,
   };
 })();

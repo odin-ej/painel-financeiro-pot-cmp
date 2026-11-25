@@ -21,9 +21,26 @@
   const esc = F.esc;
   const I = U.icon;
 
+  const CFG = window.PAINEL_CONFIG;
+  const S = window.Sheets;
+
   /* ------------------------------------------------------------------ */
   /* Blocos compartilhados                                               */
   /* ------------------------------------------------------------------ */
+
+  /**
+   * Período usado no gráfico de evolução. A planilha é mensal, então um mês
+   * isolado teria só dois pontos: nesse caso mostramos o trimestre do mês.
+   */
+  function evoPeriod(p) {
+    return p.kind === 'month' ? { kind: 'quarter', year: p.year, quarter: Math.ceil(p.month / 3) } : p;
+  }
+
+  /** Link direto para a linha de origem na aba [GERAL] (rastreabilidade até a célula). */
+  function sheetRowLink(row, label) {
+    const url = `https://docs.google.com/spreadsheets/d/${CFG.pot.spreadsheetId}/edit#gid=${CFG.pot.gidGeral}&range=A${row}`;
+    return `<a href="${url}" target="_blank" rel="noopener" class="sheet-link">${esc(label || `Linha ${row} da [GERAL]`)} ${I('external')}</a>`;
+  }
 
   /** Cabeçalho editorial de página: micro-label, título serif, texto auxiliar e ações. */
   function pageHead(label, title, lead, right) {
@@ -72,7 +89,7 @@
   /** Linha do ledger de centros de custo (clicável → dashboard do centro). */
   function ledgerRow(c) {
     return `<div class="ledger-row" role="link" tabindex="0" data-nav="#/centros/${c.id}" data-center="${c.id}" aria-label="${esc(c.name)}: ${esc(F.pct(c.pct))} utilizado, ${esc(c.statusLabel)}">
-      <div><div class="ledger-name">${esc(c.name)}</div><div class="ledger-owner label">${esc(c.owner)}</div></div>
+      <div><div class="ledger-name">${esc(c.name)}</div><div class="ledger-owner label">${c.categories.filter((x) => x.planned || x.realized).length} categorias com movimento</div></div>
       <div class="bar-wrap">${U.bar(c)}<div class="bar-meta"><span class="label">${c.pct === null ? esc(c.statusLabel) : F.pct(c.pct) + ' utilizado'}</span><span class="label">${c.available >= 0 ? 'Saldo ' + F.money(c.available, true) : 'Excede ' + F.money(-c.available, true)}</span></div></div>
       <div class="ledger-pct num">${F.pct(c.pct)}</div>
       <div class="ledger-vals"><strong>${F.money(c.realized)}</strong> realizados<br>de ${F.money(c.planned)} planejados</div>
@@ -158,7 +175,7 @@
 
   /**
    * Drawer do lançamento individual (último nível da hierarquia).
-   * Campos de comprovante/aprovação ficam preparados para integração futura.
+   * Mostra a origem exata (linha da aba [GERAL]) com link direto para a planilha.
    */
   function openTx(txId, opt = {}) {
     const t = F.D.transactions.find((x) => x.id === txId);
@@ -167,30 +184,24 @@
     const center = F.centerById[cat.centerId];
     const item = t.itemId ? F.itemById[t.itemId] : null;
     const head = `<div>${opt.back ? `<button class="btn btn-quiet btn-sm" data-back style="margin:-6px 0 10px -10px">${I('back')} Voltar</button>` : ''}
-      <span class="label" style="display:block">Lançamento · ${esc(t.id)}</span><h2 class="h2" style="margin-top:10px">${esc(t.description)}</h2></div>`;
-    const tone = t.status === 'Pago' ? 'ok' : t.status === 'Pendente' ? 'warn' : 'idle';
+      <span class="label" style="display:block">Lançamento · linha ${t.row} da planilha</span><h2 class="h2" style="margin-top:10px">${esc(t.description)}</h2></div>`;
     const body = `
       <div class="display num" style="font-size:56px;margin-bottom:12px">${U.moneyDisplay(t.amount)}</div>
-      <div style="margin-bottom:32px;display:flex;gap:8px;flex-wrap:wrap"><span class="badge tone-${tone}">${esc(t.status)}</span><span class="badge tone-idle">${esc(t.type === 'Fixo' ? 'Gasto fixo' : 'Gasto variável')}</span>${!item ? '<span class="badge tone-over">Gasto não orçado</span>' : ''}</div>
+      <div style="margin-bottom:32px;display:flex;gap:8px;flex-wrap:wrap"><span class="badge tone-${item ? 'ok' : 'over'}">${item ? 'Orçado' : 'Gasto não orçado'}</span><span class="badge tone-idle">${esc(t.type === 'Fixo' ? 'Gasto fixo' : 'Gasto variável')}</span></div>
       <div class="kv">
-        <div><span class="label">Data</span><div class="v num">${F.date(t.date)}</div></div>
+        <div><span class="label">Mês</span><div class="v">${esc(F.monthLabel(t.date.slice(0, 7)))}</div></div>
         <div><span class="label">Centro de custo</span><div class="v"><a href="#/centros/${center.id}" data-close>${esc(center.name)}</a></div></div>
         <div><span class="label">Categoria</span><div class="v">${esc(cat.name)}</div></div>
-        <div><span class="label">Referência do POT</span><div class="v">${item ? esc(item.description) + `<span class="sub label" style="display:block;margin-top:4px">${esc(item.id)} · planejado ${F.money(item.planned)}</span>` : 'Sem item planejado'}</div></div>
-        <div><span class="label">Origem</span><div class="v">${esc(t.source)}</div></div>
-        <div><span class="label">Responsável</span><div class="v">${esc(t.responsible)}</div></div>
+        <div><span class="label">Referência do POT</span><div class="v">${item ? `${F.money(item.planned)} planejados` : 'Sem valor planejado na linha'}</div></div>
+        <div class="full-kv"><span class="label">Origem</span><div class="v">${sheetRowLink(t.row)}</div></div>
       </div>
-      <div style="margin-top:32px"><span class="label label-strong">Observação</span><p class="body-sm" style="margin-top:8px;color:var(--cloud)">${t.note ? esc(t.note) : '<span class="text-fog">Sem observações.</span>'}</p></div>
-      <div style="margin-top:32px"><span class="label label-strong">Preparado para integração</span>
-        <div class="kv" style="margin-top:12px">
-          <div><span class="label">Comprovante</span><div class="v text-fog">Anexo via VExpenses / Conta Azul</div></div>
-          <div><span class="label">Aprovação</span><div class="v text-fog">Fluxo de aprovação futuro</div></div>
-        </div>
-      </div>`;
+      <div style="margin-top:32px"><span class="label label-strong">Comentários na planilha</span><p class="body-sm" style="margin-top:8px;color:var(--cloud)">${t.note ? esc(t.note) : '<span class="text-fog">Sem comentários.</span>'}</p></div>`;
     U.openDrawer({
       head, body,
+      foot: item ? `<span class="label">Item planejado da mesma linha</span><button class="btn btn-ghost btn-sm" data-item>Ver item <span class="arr">→</span></button>` : '',
       onMount: (dr) => {
         const b = dr.querySelector('[data-back]'); if (b) b.addEventListener('click', opt.back);
+        const it = dr.querySelector('[data-item]'); if (it) it.addEventListener('click', () => openItem(item.id, null, { back: () => openTx(txId, opt) }));
         dr.querySelectorAll('[data-close]').forEach((a) => a.addEventListener('click', () => U.closeDrawer()));
       },
     });
@@ -218,18 +229,107 @@
         <div><span class="label">Importância</span><div class="v">${esc(it.importance)}</div></div>
         <div><span class="label">Obrigatoriedade</span><div class="v">${esc(it.obligation)}</div></div>
         <div><span class="label">Nível de caixa para execução</span><div class="v">${esc(it.cashLevel)}</div></div>
-        <div><span class="label">Código</span><div class="v mono" style="font-size:12px">${esc(it.id)}</div></div>
+        <div><span class="label">Direcionamento</span><div class="v">${esc(it.direction || '—')}</div></div>
+        <div class="full-kv"><span class="label">Origem</span><div class="v">${sheetRowLink(it.row)}</div></div>
       </div>
+      ${it.note ? `<div style="margin-top:24px"><span class="label label-strong">Comentários na planilha</span><p class="body-sm" style="margin-top:8px;color:var(--cloud)">${esc(it.note)}</p></div>` : ''}
       <div style="margin:24px 0 40px">${U.bar(m, { size: 'lg' })}</div>
-      <div class="section-head" style="margin-bottom:8px"><span class="label label-strong">Lançamentos vinculados · ${txs.length}</span></div>
-      <div class="tx-list">${txs.length ? txs.map((t) => `<button class="tx" data-tx="${t.id}"><span class="d">${F.date(t.date)}</span><span class="n">${esc(t.description)}</span><span class="a">${F.money(t.amount)}</span></button>`).join('') : '<p class="text-fog body-sm" style="padding:14px 0">Item ainda sem lançamentos.</p>'}</div>
+      <div class="section-head" style="margin-bottom:8px"><span class="label label-strong">Realizado nesta linha · ${txs.length}</span></div>
+      <div class="tx-list">${txs.length ? txs.map((t) => `<button class="tx" data-tx="${t.id}"><span class="d">${F.date(t.date)}</span><span class="n">${esc(t.description)}</span><span class="a">${F.money(t.amount)}</span></button>`).join('') : '<p class="text-fog body-sm" style="padding:14px 0">Item ainda sem valor realizado.</p>'}</div>
       <div class="tx-total"><span class="label label-strong">Total</span><span class="display num">${F.money(m.realized)}</span></div>`;
+    const foot = S.canWrite()
+      ? `<span class="label">Alterações vão direto para a planilha</span><button class="btn btn-ghost btn-sm" data-edit-item>${I('edit')} Editar item</button>`
+      : `<span class="label">Para editar pelo painel, conecte o Apps Script</span><a class="btn btn-quiet btn-sm" href="#/configuracoes" data-close>Configurar <span class="arr">→</span></a>`;
     U.openDrawer({
-      head, body,
+      head, body, foot,
       onMount: (dr) => {
         const b = dr.querySelector('[data-back]'); if (b) b.addEventListener('click', opt.back);
         dr.querySelectorAll('[data-tx]').forEach((x) => x.addEventListener('click', () => openTx(x.dataset.tx, { back: () => openItem(itemId, p, opt) })));
+        dr.querySelectorAll('[data-close]').forEach((a) => a.addEventListener('click', () => U.closeDrawer()));
+        const e = dr.querySelector('[data-edit-item]'); if (e) e.addEventListener('click', () => editItemModal(it, m.realized));
       },
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Escrita na planilha (Apps Script)                                   */
+  /* ------------------------------------------------------------------ */
+
+  const IMPORTANCIAS = ['Alta', 'Média', 'Baixa'];
+  const OBRIGATORIEDADES = ['Obrigatória', 'Planejável', 'Adiável'];
+
+  /** Nome do centro como está na planilha (ex.: Cultural → "Pessoas"). */
+  function sheetCenterName(centerId) {
+    const c = CFG.centros.find((x) => x.id === centerId);
+    return c ? c.sheet : '';
+  }
+
+  /** Categorias conhecidas: catálogo oficial + as já usadas na planilha. */
+  function knownCategories() {
+    const map = new Map();
+    (F.D.catalog || []).forEach((c) => map.set(F.norm(c.name), { name: c.name, custeio: c.custeio }));
+    F.D.items.forEach((i) => { const n = F.catById[i.categoryId].name; if (!map.has(F.norm(n))) map.set(F.norm(n), { name: n, custeio: i.custeio }); });
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }
+
+  /**
+   * Modal de edição de um item existente (altera ou exclui a linha da [GERAL]).
+   * Envia junto a data e a descrição atuais para o Apps Script conferir que
+   * a linha não mudou desde a leitura.
+   * @param {Object} it - item (F.itemById)
+   * @param {number} realized - realizado da linha; com valor, a exclusão é bloqueada
+   */
+  function editItemModal(it, realized) {
+    const cat = F.catById[it.categoryId];
+    const opts = (arr, v) => ['<option value="">—</option>', ...arr.map((x) => `<option${x === v ? ' selected' : ''}>${x}</option>`)].join('');
+    const delTip = realized ? ` data-tip="${esc('<div class="tr">Itens com valor realizado não podem ser excluídos pelo painel.</div>')}"` : '';
+    U.openModal(`
+      <span class="label">Editar item · linha ${it.row}</span>
+      <h2 class="h2" style="margin:10px 0 24px">${esc(it.description)}</h2>
+      <form id="eit" class="form-grid" novalidate>
+        <label class="full"><span class="label">Descrição</span><input class="input" name="description" value="${esc(it.description)}" maxlength="200"></label>
+        <label><span class="label">Valor planejado (R$)</span><input class="input" type="number" name="planned" min="0.01" step="0.01" value="${it.planned}"></label>
+        <label><span class="label">Categoria</span><input class="input" name="category" value="${esc(cat.name)}" list="dl-cats"></label>
+        <label><span class="label">Importância</span><span class="field" style="width:100%"><select class="select" name="importance" style="width:100%">${opts(IMPORTANCIAS, it.importance)}</select>${I('down', 'chev')}</span></label>
+        <label><span class="label">Obrigatoriedade</span><span class="field" style="width:100%"><select class="select" name="obligation" style="width:100%">${opts(OBRIGATORIEDADES, it.obligation)}</select>${I('down', 'chev')}</span></label>
+        <datalist id="dl-cats">${knownCategories().map((c) => `<option value="${esc(c.name)}">`).join('')}</datalist>
+        <p class="full body-sm" id="eit-err" role="alert" style="color:var(--over)"></p>
+        <div class="full" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-quiet" id="eit-del"${realized ? ' disabled aria-disabled="true"' : ''}${delTip}>${I('trash')} Excluir item</button>
+          <div style="display:flex;gap:8px"><button type="button" class="btn btn-ghost" data-close-modal>Cancelar</button><button type="submit" class="btn btn-primary">Salvar na planilha <span class="arr">→</span></button></div>
+        </div>
+      </form>`, (m) => {
+      const fm = m.querySelector('#eit');
+      const err = m.querySelector('#eit-err');
+      const expect = { date: it.date, description: it.description };
+      const busy = (on) => m.querySelectorAll('button').forEach((b) => { b.disabled = on || (b.id === 'eit-del' && !!realized); });
+      fm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const planned = Number(fm.planned.value);
+        if (!fm.description.value.trim()) { err.textContent = 'Informe a descrição.'; return; }
+        if (!(planned > 0)) { err.textContent = 'Informe um valor planejado maior que zero.'; return; }
+        if (!fm.category.value.trim()) { err.textContent = 'Informe a categoria.'; return; }
+        busy(true); err.textContent = '';
+        try {
+          const known = knownCategories().find((c) => F.norm(c.name) === F.norm(fm.category.value));
+          await S.post('updateItem', { row: it.row, expect, item: {
+            date: it.date, description: fm.description.value.trim(), category: known ? known.name : fm.category.value.trim(),
+            center: sheetCenterName(cat.centerId), planned, importance: fm.importance.value, obligation: fm.obligation.value, custeio: known ? known.custeio : it.custeio,
+          } });
+          U.closeModal(); U.closeDrawer(); U.toast('Item atualizado na planilha.');
+          window.App.reload();
+        } catch (ex) { err.textContent = ex.message; busy(false); }
+      });
+      m.querySelector('#eit-del').addEventListener('click', async () => {
+        if (realized) return;
+        if (!window.confirm(`Excluir a linha ${it.row} ("${it.description}") da planilha? A exclusão não pode ser desfeita pelo painel.`)) return;
+        busy(true); err.textContent = '';
+        try {
+          await S.post('deleteItem', { row: it.row, expect });
+          U.closeModal(); U.closeDrawer(); U.toast('Item excluído da planilha.');
+          window.App.reload();
+        } catch (ex) { err.textContent = ex.message; busy(false); }
+      });
     });
   }
 
@@ -245,7 +345,7 @@
     const cmp = F.comparePrev(p);
     const alerts = F.alerts(p);
     const spent = Object.values(a.byCenter).filter((c) => c.realized > 0);
-    const evo = F.evolution(p);
+    const evo = F.evolution(evoPeriod(p));
     const cmpMonth = p.kind === 'month' ? `${p.year}-${String(p.month).padStart(2, '0')}` : null;
 
     const html = `
@@ -275,7 +375,7 @@
             <div><span class="label">Ritmo de consumo</span><h2 class="h2" style="margin-top:8px">Evolução acumulada</h2></div>
             <div class="legend"><span><i class="dash"></i>Planejado</span><span><i class="line" style="background:var(--cyan-signal)"></i>Realizado</span></div>
           </div>
-          ${U.lineChart(evo, p)}
+          ${U.lineChart(evo, evoPeriod(p))}
         </div>
         <div class="panel">
           <div class="panel-head"><div><span class="label">Distribuição dos gastos</span><h2 class="h2" style="margin-top:8px">Participação no realizado</h2></div></div>
@@ -365,15 +465,15 @@
       const cm = F.comparePrev(lp, id);
       if (cm && cm.delta !== null) cmpMonthly = `<span class="delta"><b>${cm.delta > 0 ? '↑' : '↓'} ${F.pct(Math.abs(cm.delta))}</b> em ${F.MESES[lp.month - 1]} vs. mês anterior</span>`;
     }
-    const evo = F.evolution(p, { centerId: id });
-    const evoLabel = p.kind === 'month' ? 'Evolução do mês' : p.kind === 'quarter' ? 'Evolução do trimestre' : 'Evolução do ano';
+    const evo = F.evolution(evoPeriod(p), { centerId: id });
+    const evoLabel = p.kind === 'year' ? 'Evolução do ano' : `Evolução do ${p.kind === 'month' ? 'trimestre de ' + F.MESES[p.month - 1] : 'trimestre'}`;
     const topTx = F.transactionsFor(p, { centerId: id }).slice().sort((x, y) => y.amount - x.amount).slice(0, 6);
 
     const tabs = F.centers.map((x) => `<a href="#/centros/${x.id}"${x.id === id ? ' aria-current="page"' : ''}>${esc(x.name)}</a>`).join('');
 
     const html = `
       <nav class="center-tabs" aria-label="Centros de custo">${tabs}</nav>
-      ${pageHead(`Centro de custo / ${F.periodShort(p)}`, esc(ce.name), `${esc(ce.owner)} · ${c.categories.length} categorias · ${esc(F.periodLabel(p))}`,
+      ${pageHead(`Centro de custo / ${F.periodShort(p)}`, esc(ce.name), `${c.categories.length} categorias · ${esc(F.periodLabel(p))}`,
         `<a class="btn btn-ghost" href="#/lancamentos?centro=${id}">Lançamentos <span class="arr">→</span></a>`)}
       ${hero(c, { label: 'Execução do centro', compare: `<div class="compare" style="margin-top:0">${U.deltaText(cmp)}${cmpMonthly}</div>` })}
 
@@ -383,7 +483,7 @@
             <div><span class="label">${esc(evoLabel)}</span><h2 class="h2" style="margin-top:8px">Velocidade de consumo do orçamento</h2></div>
             <div class="legend"><span><i class="dash"></i>Planejado acumulado</span><span><i class="line" style="background:var(--cyan-signal)"></i>Realizado acumulado</span></div>
           </div>
-          ${U.lineChart(evo, p)}
+          ${U.lineChart(evo, evoPeriod(p))}
         </div>
       </section>
 
@@ -542,7 +642,7 @@
     const html = `
       ${pageHead(`Planejamento orçamentário / ${F.periodShort(p)}`, 'Planejamento Orçamentário',
         `O POT de ${esc(F.periodRange(p))}: quanto cada centro planejou gastar, item por item, e como está a execução.`,
-        `<div class="seg" role="group" aria-label="Modo de visualização"><button data-mode="manager" aria-pressed="${mode === 'manager'}">Gerencial</button><button data-mode="detailed" aria-pressed="${mode === 'detailed'}">Detalhada</button></div>`)}
+        `<a class="btn btn-primary" href="#/pot/construir">Construir orçamento <span class="arr">→</span></a><div class="seg" role="group" aria-label="Modo de visualização"><button data-mode="manager" aria-pressed="${mode === 'manager'}">Gerencial</button><button data-mode="detailed" aria-pressed="${mode === 'detailed'}">Detalhada</button></div>`)}
       <div class="stat-strip" style="margin-bottom:var(--s48)">
         <div class="cell"><span class="label">Orçamento total</span><div class="value num">${U.moneyDisplay(t.planned)}</div><div class="hint">${a.items.length} itens planejados</div></div>
         <div class="cell"><span class="label">Realizado</span><div class="value num">${U.moneyDisplay(t.realized)}</div><div class="hint">${a.txs.length} lançamentos</div></div>
@@ -678,7 +778,7 @@
       const draft = F.draftAnalysis(p, ce.id);
       return `<article class="area" id="area-${ce.id}">
         <div>
-          <span class="label">${esc(ce.owner)}</span>
+          <span class="label">${c.categories.filter((x) => x.planned || x.realized).length} categorias com movimento</span>
           <h3 class="area-name" style="margin-top:10px"><a href="#/centros/${ce.id}" data-setmonth>${esc(ce.name)}</a></h3>
           <div class="area-pct"><span class="display num">${U.pctDisplay(c.pct)}</span>${U.badge(c)}</div>
           ${U.bar(c, { size: 'lg' })}
@@ -717,7 +817,7 @@
             <div class="cell"><span class="label">Realizado</span><div class="value num">${U.moneyDisplay(t.realized)}</div><div class="hint">${a.txs.length} lançamentos</div></div>
             <div class="cell"><span class="label">Diferença</span><div class="value num">${U.moneyDisplay(Math.abs(t.devAbs))}</div><div class="hint">${t.devAbs <= 0 ? 'Abaixo do orçamento' : 'Acima do orçamento'}</div></div>
             <div class="cell"><span class="label">Execução</span><div class="value num">${F.pct(t.pct)}</div><div class="hint">${esc(t.statusLabel)}</div></div>
-            <div class="cell"><span class="label">Entradas</span><div class="value num">${income === null ? '—' : U.moneyDisplay(income)}</div>${income === null ? '<div class="pending-int">Depende da integração com o fluxo de caixa (A Receber).</div>' : '<div class="hint">Recebimentos do mês</div>'}</div>
+            <div class="cell"><span class="label">Entradas</span><div class="value num">${income === null ? '—' : U.moneyDisplay(income)}</div>${income === null ? '<div class="pending-int">Sem entradas registradas na planilha de indicadores para este mês.</div>' : '<div class="hint">Indicadores › Resultado de Caixa</div>'}</div>
             <div class="cell"><span class="label">Resultado mensal</span><div class="value num ${result !== null && result < 0 ? 'tone-over' : ''}">${result === null ? '—' : esc(F.signedMoney(result))}</div><div class="hint">${result === null ? 'Aguardando entradas' : result < 0 ? 'Entradas menores que os gastos' : 'Entradas superaram os gastos'}</div></div>
           </div>
           <div class="inverted" style="display:flex;flex-direction:column;justify-content:space-between;gap:24px">
@@ -810,10 +910,30 @@
       </div>`, (m) => {
       const ta = m.querySelector('#an-text');
       m.querySelector('#an-draft').addEventListener('click', () => { ta.value = draft; ta.focus(); });
-      m.querySelector('#an-save').addEventListener('click', () => {
-        F.saveAnalysis(month, centerId, ta.value, 'manual');
+      m.querySelector('#an-save').addEventListener('click', async (ev) => {
+        const text = ta.value.trim();
+        let onde = 'neste navegador';
+        // Com o Apps Script conectado, a análise vai para a planilha (visível para todos);
+        // sem ele, fica salva só no navegador de quem escreveu.
+        if (S.canWrite()) {
+          ev.currentTarget.disabled = true;
+          try {
+            await S.post('saveAnalysis', { month, centerId, text, author: 'Painel', source: 'manual' });
+            const list = F.D.analyses.filter((x) => !(x.month === month && x.centerId === centerId));
+            if (text) list.push({ month, centerId, text, author: 'Painel', updatedAt: new Date().toISOString().slice(0, 10), source: 'manual' });
+            F.D.analyses = list;
+            F.saveAnalysis(month, centerId, '', 'manual'); // remove eventual cópia local antiga
+            onde = 'na planilha';
+          } catch (ex) {
+            F.saveAnalysis(month, centerId, text, 'manual');
+            U.toast(`Planilha indisponível (${ex.message}) — análise salva neste navegador.`);
+            onde = '';
+          }
+        } else {
+          F.saveAnalysis(month, centerId, text, 'manual');
+        }
         U.closeModal();
-        U.toast(ta.value.trim() ? 'Análise salva para ' + F.monthLabel(month) + '.' : 'Análise removida.');
+        if (onde) U.toast(text ? `Análise salva ${onde}.` : 'Análise removida.');
         const y = window.scrollY;
         ctx.render();
         window.scrollTo(0, y);
@@ -845,14 +965,14 @@
       .sort((x, y) => x.name.localeCompare(y.name, 'pt-BR')).map((c) => ({ value: c.id, label: c.name + (f.center ? '' : ` · ${F.centerById[c.centerId].name}`) }))];
 
     const html = `
-      ${pageHead(`Lançamentos / ${F.periodShort(p)}`, 'Lançamentos financeiros', `Todos os gastos realizados em ${esc(F.periodRange(p))} de ${p.year} — a origem de cada número da plataforma.`,
-        '<button class="btn btn-primary" id="new-tx">+ Novo lançamento <span class="arr">→</span></button>')}
+      ${pageHead(`Lançamentos / ${F.periodShort(p)}`, 'Lançamentos financeiros', `Valores realizados na planilha do POT em ${esc(F.periodRange(p))} de ${p.year}. O preenchimento continua sendo feito na planilha.`,
+        `<a class="btn btn-ghost" href="${CFG.pot.url}" target="_blank" rel="noopener">Abrir planilha ${I('external')}</a>`)}
       <div class="filters">
         <label class="search"><span class="sr-only">Buscar lançamentos</span>${I('search')}<input id="tx-q" class="input" type="search" placeholder="Buscar — ex.: ENEJ" value="${esc(f.q)}"></label>
         ${U.select('tx-center', [{ value: '', label: 'Todos os centros' }, ...F.centers.map((x) => ({ value: x.id, label: x.name }))], f.center, { label: 'Centro de custo' })}
         <span id="tx-cat-wrap">${U.select('tx-cat', catOpts(), f.cat, { label: 'Categoria' })}</span>
         ${U.select('tx-type', [{ value: '', label: 'Todos os tipos' }, { value: 'Fixo', label: 'Gasto fixo' }, { value: 'Variável', label: 'Gasto variável' }], f.type, { label: 'Tipo' })}
-        ${U.select('tx-status', [{ value: '', label: 'Todos os status' }, { value: 'Pago', label: 'Pago' }, { value: 'Pendente', label: 'Pendente' }, { value: 'Em conciliação', label: 'Em conciliação' }], f.status, { label: 'Status' })}
+        ${U.select('tx-status', [{ value: '', label: 'Orçados e não orçados' }, { value: 'Orçado', label: 'Orçado' }, { value: 'Não orçado', label: 'Gasto não orçado' }], f.status, { label: 'Status' })}
         ${U.select('tx-range', VALOR_FAIXAS, f.range, { label: 'Faixa de valor' })}
         <button class="btn btn-quiet btn-sm" id="tx-clear">Limpar filtros</button>
       </div>
@@ -889,14 +1009,14 @@
       view.querySelector('#tx-sum').innerHTML = `<span class="display num">${U.moneyDisplay(total)}</span><span class="label">${rows.length} ${rows.length === 1 ? 'lançamento' : 'lançamentos'}${f.q ? ` para “${esc(f.q)}”` : ''}</span>`;
       const shown = rows.slice(0, ctx.state.txLimit);
       const th = (k, l, r) => `<th class="${r ? 'r' : ''}" aria-sort="${s.key === k ? (s.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"><button data-sort="${k}">${l}${s.key === k ? (s.dir === 'asc' ? ' ↑' : ' ↓') : ''}</button></th>`;
-      const stTone = (st) => (st === 'Pago' ? 'ok' : st === 'Pendente' ? 'warn' : 'idle');
+      const stTone = (st) => (st === 'Orçado' ? 'ok' : 'over');
       view.querySelector('#tx-table').innerHTML = `
-        <thead><tr>${th('date', 'Data')}${th('description', 'Descrição')}${th('cat', 'Categoria')}${th('center', 'Centro')}${th('amount', 'Valor', 1)}<th>Tipo</th><th>Status</th></tr></thead>
+        <thead><tr>${th('date', 'Mês')}${th('description', 'Descrição')}${th('cat', 'Categoria')}${th('center', 'Centro')}${th('amount', 'Valor', 1)}<th>Tipo</th><th>Status</th></tr></thead>
         <tbody>${shown.length ? shown.map((t) => {
           const cat = F.catById[t.categoryId];
           return `<tr class="click" tabindex="0" data-tx="${t.id}">
-            <td class="num mono" style="color:var(--ash)">${F.date(t.date)}</td>
-            <td class="strong">${esc(t.description)}<span class="sub">${t.itemId ? esc(F.itemById[t.itemId].description) : '<span class="tone-over">Gasto não orçado</span>'}</span></td>
+            <td class="num mono" style="color:var(--ash)">${F.MESES_CURTOS[Number(t.date.slice(5, 7)) - 1]} ${t.date.slice(0, 4)}</td>
+            <td class="strong">${esc(t.description)}<span class="sub">${t.itemId ? `Planejado ${F.money(F.itemById[t.itemId].planned)} · linha ${t.row}` : `<span class="tone-over">Gasto não orçado</span> · linha ${t.row}`}</span></td>
             <td>${esc(cat.name)}</td>
             <td>${esc(F.centerById[cat.centerId].name)}</td>
             <td class="r strong">${F.money(t.amount)}</td>
@@ -937,64 +1057,8 @@
           const r = e.target.closest('tr[data-tx]'); if (r) openTx(r.dataset.tx);
         });
         view.querySelector('#tx-table').addEventListener('keydown', (e) => { const r = e.target.closest('tr[data-tx]'); if (r && e.key === 'Enter') openTx(r.dataset.tx); });
-        view.querySelector('#new-tx').addEventListener('click', () => newTxModal(ctx));
       },
     };
-  }
-
-  /** Modal de novo lançamento (protótipo: grava apenas em memória e recalcula toda a plataforma). */
-  function newTxModal(ctx) {
-    const ms = F.periodMonths(ctx.state.period);
-    const lastM = ms[ms.length - 1];
-    const def = `${lastM}-${String(new Date(Number(lastM.slice(0, 4)), Number(lastM.slice(5)), 0).getDate()).padStart(2, '0')}`;
-    const min = `${F.dataMonths[0]}-01`;
-    const max = `${F.lastMonth}-30`;
-    const centerOpts = F.centers.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
-    U.openModal(`
-      <span class="label">Novo lançamento</span>
-      <h2 class="h2" style="margin:10px 0 24px">Registrar gasto realizado</h2>
-      <form id="ntx" class="form-grid" novalidate>
-        <label class="full"><span class="label">Descrição</span><input class="input" name="description" required placeholder="Ex.: Uber — reunião com cliente"></label>
-        <label><span class="label">Data</span><input class="input" type="date" name="date" value="${def}" min="${min}" max="${max}" required></label>
-        <label><span class="label">Valor (R$)</span><input class="input" type="number" name="amount" min="0.01" step="0.01" required placeholder="0,00"></label>
-        <label><span class="label">Centro de custo</span><span class="field" style="width:100%"><select class="select" name="center" style="width:100%">${centerOpts}</select>${I('down', 'chev')}</span></label>
-        <label><span class="label">Categoria</span><span class="field" style="width:100%"><select class="select" name="category" style="width:100%"></select>${I('down', 'chev')}</span></label>
-        <label class="full"><span class="label">Item do POT (referência)</span><span class="field" style="width:100%"><select class="select" name="item" style="width:100%"></select>${I('down', 'chev')}</span></label>
-        <p class="full body-sm text-fog" id="ntx-err" role="alert"></p>
-        <div class="full" style="display:flex;justify-content:flex-end;gap:8px">
-          <button type="button" class="btn btn-ghost" data-close-modal>Cancelar</button>
-          <button type="submit" class="btn btn-primary">Registrar <span class="arr">→</span></button>
-        </div>
-      </form>
-      <p class="label" style="margin-top:16px">Protótipo: o lançamento vale apenas para esta sessão.</p>`, (m) => {
-      const fm = m.querySelector('#ntx');
-      const fillCats = () => {
-        fm.category.innerHTML = F.D.categories.filter((c) => c.centerId === fm.center.value).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-        fillItems();
-      };
-      const fillItems = () => {
-        const month = (fm.date.value || def).slice(0, 7);
-        const its = F.D.items.filter((i) => i.categoryId === fm.category.value && i.month === month);
-        fm.item.innerHTML = `<option value="">Sem item — gasto não orçado</option>` + its.map((i) => `<option value="${i.id}">${esc(i.description)} · ${F.money(i.planned)}</option>`).join('');
-        if (its.length) fm.item.value = its[0].id;
-      };
-      fm.center.addEventListener('change', fillCats);
-      fm.category.addEventListener('change', fillItems);
-      fm.date.addEventListener('change', fillItems);
-      fillCats();
-      fm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const amount = Number(fm.amount.value);
-        const err = m.querySelector('#ntx-err');
-        if (!fm.description.value.trim()) { err.textContent = 'Informe a descrição do gasto.'; fm.description.focus(); return; }
-        if (!(amount > 0)) { err.textContent = 'Informe um valor maior que zero.'; fm.amount.focus(); return; }
-        if (!fm.date.value || fm.date.value < min || fm.date.value > max) { err.textContent = 'Use uma data entre janeiro e setembro de 2026.'; fm.date.focus(); return; }
-        F.addTransaction({ date: fm.date.value, description: fm.description.value.trim(), categoryId: fm.category.value, amount, itemId: fm.item.value || null });
-        U.closeModal();
-        U.toast(`Lançamento de ${F.money(amount)} registrado — indicadores recalculados.`);
-        ctx.render();
-      });
-    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -1047,5 +1111,9 @@
     return { title: 'Página não encontrada', crumbs: [['Não encontrado']], html: `${pageHead('404', 'Página não encontrada', 'O endereço não corresponde a nenhuma tela.', '<a class="btn btn-primary" href="#/">Ir para a Visão Geral <span class="arr">→</span></a>')}` };
   }
 
-  window.Pages = { overview, centersIndex, centerPage, potPage, cmpPage, txPage, settingsPage, profilePage, notFound, openCategory, openTx, openItem };
+  window.Pages = {
+    overview, centersIndex, centerPage, potPage, cmpPage, txPage, settingsPage, profilePage, notFound, openCategory, openTx, openItem,
+    // utilidades compartilhadas com pages-planilha.js
+    _h: { pageHead, sectionHead, knownCategories, sheetCenterName, IMPORTANCIAS, OBRIGATORIEDADES, evoPeriod },
+  };
 })();
