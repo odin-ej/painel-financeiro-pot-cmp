@@ -485,11 +485,15 @@
    * @param {string[]} months - "AAAA-MM"
    * @param {Array<{name:string, values:(number|null)[]}>} series - mesmo tipo de unidade
    * @param {'money'|'pct'|'num'} kind
+   * @param {{avg?:number|null}} [opts] - avg: desenha a linha tracejada de média (entra na escala)
    * @returns {string} HTML (interações via mountSeries)
    */
-  function seriesChart(months, series, kind) {
+  function seriesChart(months, series, kind, opts = {}) {
+    const avg = Number.isFinite(opts.avg) ? opts.avg : null;
     const all = series.flatMap((s) => s.values.filter((v) => v !== null));
-    if (!all.length) return '<div class="empty">Sem valores preenchidos ainda.</div>';
+    if (!all.length && avg === null) return '<div class="empty">Sem valores preenchidos ainda.</div>';
+    // A média pode vir de meses fora do gráfico (ex.: média do ano num gráfico do trimestre)
+    if (avg !== null) all.push(avg);
     const hi = Math.max(0, ...all), lo = Math.min(0, ...all);
     const top = hi > 0 ? niceMax(hi) : 0;
     const bot = lo < 0 ? -niceMax(-lo) : 0;
@@ -510,8 +514,9 @@
     }).join('');
     const xl = months.map((m, i) => `<span class="xl" style="left:${(i / n) * 100}%">${F.MESES_CURTOS[Number(m.slice(5)) - 1]}</span>`).join('');
     const dots = series.map((s, k) => `<div class="dot" data-k="${k}" style="background:${SERIES_COLORS[k % SERIES_COLORS.length]}"></div>`).join('');
-    return `<div class="line-chart series-chart" data-series>
-      ${grid}
+    const avgLine = avg === null ? '' : `<div class="avg-line" style="top:${(1 - (avg - bot) / span) * 100}%"><span>Média ${fmtKind(kind, avg, true)}</span></div>`;
+    return `<div class="line-chart series-chart" data-series data-top="${top}" data-bot="${bot}">
+      ${grid}${avgLine}
       <svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">${paths}</svg>
       ${xl}<div class="guide"></div>${dots}
       <div class="hit" tabindex="0" role="img" aria-label="${esc(series.map((s) => s.name).join(', '))} por mês"></div>
@@ -530,9 +535,8 @@
   function mountSeries(el, months, plotted, kind, rows) {
     const ch = el.querySelector('[data-series]');
     if (!ch) return;
-    const all = plotted.flatMap((s) => s.values.filter((v) => v !== null));
-    const hi = Math.max(0, ...all), lo = Math.min(0, ...all);
-    const top = hi > 0 ? niceMax(hi) : 0, bot = lo < 0 ? -niceMax(-lo) : 0, span = top - bot || 1;
+    // Reaproveita a escala calculada no desenho (inclui a linha de média, se houver)
+    const top = Number(ch.dataset.top) || 0, bot = Number(ch.dataset.bot) || 0, span = top - bot || 1;
     const n = months.length - 1 || 1;
     const guide = ch.querySelector('.guide');
     const dots = ch.querySelectorAll('.dot');

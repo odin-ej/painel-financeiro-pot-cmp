@@ -454,6 +454,20 @@
       indicators = parseIndicators(indText, C.indicadores.marcador);
       const hide = (C.indicadores.ocultar || []).map(norm);
       indicators.blocks = indicators.blocks.filter((b) => !hide.includes(norm(b.title)));
+      // Organiza por tema (config.grupos): define b.theme e ordena grupo → item.
+      // Blocos fora das listas mantêm a ordem da planilha, no grupo "Outros".
+      const grupos = C.indicadores.grupos || [];
+      const rank = (b) => {
+        for (let g = 0; g < grupos.length; g++) {
+          const k = grupos[g].itens.map(norm).indexOf(norm(b.title));
+          if (k >= 0) return [g, k, grupos[g].nome];
+        }
+        return [grupos.length, 0, 'Outros indicadores'];
+      };
+      indicators.blocks = indicators.blocks
+        .map((b, i) => { const [g, k, nome] = rank(b); b.theme = nome; return { b, key: [g, k, i] }; })
+        .sort((a, z) => a.key[0] - z.key[0] || a.key[1] - z.key[1] || a.key[2] - z.key[2])
+        .map((x) => x.b);
       data.incomes = Object.entries(indicators.entradas).map(([month, amount]) => ({ month, amount }));
     }
     const analyses = await fetchAnalyses();

@@ -25,6 +25,16 @@ window.PAINEL_CONFIG = {
     marcador: 'Outros Indicadores',
     /** Blocos da aba que não aparecem no painel (comparação pelo título, sem acento/maiúsculas). */
     ocultar: ['Iniciativas Inovadoras'],
+    /**
+     * Organização dos indicadores no painel (ordem dos grupos e dos itens).
+     * Comparação pelo título, sem acento/maiúsculas. Indicador novo que não
+     * estiver em nenhuma lista cai em "Outros indicadores" — basta incluí-lo aqui.
+     */
+    grupos: [
+      { nome: 'Caixa e liquidez', itens: ['Resultado de Caixa', 'Variação de Caixa', 'Eficiência de Caixa', 'Cash Runway', 'Caixa Ideal', 'Taxa de Poupança em Ativos Financeiros'] },
+      { nome: 'Receita e estrutura de custos', itens: ['Taxa de Conversão de Receitas (TCR)', 'Rigidez Operacional', 'Taxa de inadimplência'] },
+      { nome: 'Pessoas e inovação', itens: ['Vivência Empresarial', 'Reinvestimento em membros (% de saídas)', 'Taxa de Envolvimento', 'Índice de Satisfação das Inovações'] },
+    ],
     url: 'https://docs.google.com/spreadsheets/d/19av-VN8iBAKNJzYpcLMziq_kLOjuy_yRUYYZnFI9Lr0/edit?gid=230818536',
   },
 

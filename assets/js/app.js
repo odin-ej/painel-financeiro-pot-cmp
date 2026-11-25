@@ -64,6 +64,7 @@
    */
   function setPeriod(p, silent) {
     state.period = p;
+    pp.open = false; // escolher um período sempre fecha o painel do seletor
     save();
     if (!silent) render();
   }
@@ -151,30 +152,110 @@
   /* Seletor de período (topbar)                                         */
   /* ------------------------------------------------------------------ */
 
+  /*
+   * Seletor de período em painel (substitui os <select> nativos):
+   *  [‹] [TRI  4º trimestre de 2026 ⌄] [›]
+   * O painel tem abas Mês/Trimestre/Ano, navegação por ano e uma grade de
+   * células; períodos sem nenhum mês na planilha ficam desabilitados.
+   * `pp` guarda o que está sendo navegado no painel — só vira período de
+   * verdade quando uma célula é clicada.
+   */
+  const pp = { open: false, kind: 'quarter', year: 0 };
+  const KIND_TAG = { month: 'Mês', quarter: 'Tri', year: 'Ano' };
+
+  /** O período tem ao menos um mês presente na planilha? */
+  function hasData(p) { return F.periodMonths(p).some((m) => F.dataMonths.includes(m)); }
+
+  /**
+   * Período vizinho (dir = -1 anterior, +1 próximo) ou null se não houver dados.
+   * @example stepPeriod({kind:'month',year:2026,month:12}, 1) // → janeiro/2027 (se existir na planilha)
+   */
+  function stepPeriod(p, dir) {
+    let q;
+    if (p.kind === 'month') { const i = p.year * 12 + (p.month - 1) + dir; q = { kind: 'month', year: Math.floor(i / 12), month: (i % 12) + 1 }; }
+    else if (p.kind === 'quarter') { const i = p.year * 4 + (p.quarter - 1) + dir; q = { kind: 'quarter', year: Math.floor(i / 4), quarter: (i % 4) + 1 }; }
+    else q = { kind: 'year', year: p.year + dir };
+    return hasData(q) ? q : null;
+  }
+
+  /** Anos presentes na planilha, em ordem crescente. */
+  function dataYears() { return [...new Set(F.dataMonths.map((m) => Number(m.slice(0, 4))))].sort((a, b) => a - b); }
+
   function periodSelector() {
     const p = state.period;
-    // Rótulo curto (Tri) usado no mobile para o seletor caber em uma linha
-    const kinds = [['month', 'Mês', 'Mês'], ['quarter', 'Trimestre', 'Tri'], ['year', 'Ano', 'Ano']];
-    const opts = F.periodOptions(p.kind).map((o) => ({ value: F.periodKey(o), label: F.periodLabel(o) }));
+    const prev = stepPeriod(p, -1), next = stepPeriod(p, 1);
+    const chev = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
     return `<div class="period" role="group" aria-label="Período de análise">
-      <div class="seg">${kinds.map(([k, l, s]) => `<button data-kind="${k}" aria-pressed="${p.kind === k}" aria-label="${l}"><span class="long">${l}</span><span class="short">${s}</span></button>`).join('')}</div>
-      ${U.select('period-select', opts, F.periodKey(p), { label: 'Selecionar período' })}
+      <button class="pp-step" data-pp-step="-1" aria-label="Período anterior"${prev ? ` title="${F.esc(F.periodLabel(prev))}"` : ' disabled'}>‹</button>
+      <button class="pp-trigger" id="pp-trigger" aria-haspopup="dialog" aria-expanded="${pp.open}">
+        <span class="pp-tag">${KIND_TAG[p.kind]}</span><span class="pp-val">${F.esc(F.periodLabel(p))}</span>${chev}
+      </button>
+      <button class="pp-step" data-pp-step="1" aria-label="Próximo período"${next ? ` title="${F.esc(F.periodLabel(next))}"` : ' disabled'}>›</button>
+      ${pp.open ? periodPopover() : ''}
     </div>`;
   }
 
-  /**
-   * Ao trocar o tipo de período, escolhe um equivalente coerente:
-   * trimestre/ano → seu último mês já corrente; mês → trimestre que o contém.
-   */
-  function switchKind(kind) {
+  /** Conteúdo do painel para o tipo/ano em navegação (pp.kind / pp.year). */
+  function periodPopover() {
     const p = state.period;
-    const months = F.periodMonths(p);
-    let last = months[months.length - 1] || F.lastMonth;
-    if (last > F.lastMonth && months[0] <= F.lastMonth) last = F.lastMonth;
-    const y = Number(last.slice(0, 4)), m = Number(last.slice(5));
-    if (kind === 'month') setPeriod({ kind: 'month', year: y, month: m });
-    else if (kind === 'quarter') setPeriod({ kind: 'quarter', year: y, quarter: Math.ceil(m / 3) });
-    else setPeriod({ kind: 'year', year: p.year });
+    const years = dataYears();
+    const now = new Date();
+    const today = { y: now.getFullYear(), m: now.getMonth() + 1 };
+    const cell = (q, main, sub, isNow) => {
+      const sel = F.periodKey(q) === F.periodKey(p);
+      return `<button class="pp-cell${isNow ? ' is-now' : ''}" data-pp-pick="${F.periodKey(q)}" aria-pressed="${sel}"${hasData(q) ? '' : ' disabled'}${isNow ? ' aria-description="período atual"' : ''}>
+        <b>${main}</b>${sub ? `<span>${sub}</span>` : ''}</button>`;
+    };
+    let grid;
+    if (pp.kind === 'month') {
+      grid = `<div class="pp-grid pp-months">${F.MESES_CURTOS.map((nm, i) => cell({ kind: 'month', year: pp.year, month: i + 1 }, nm.charAt(0) + nm.slice(1).toLowerCase(), '', pp.year === today.y && i + 1 === today.m)).join('')}</div>`;
+    } else if (pp.kind === 'quarter') {
+      grid = `<div class="pp-grid pp-quarters">${[1, 2, 3, 4].map((t) => cell({ kind: 'quarter', year: pp.year, quarter: t }, `${t}º tri`,
+        `${F.MESES_CURTOS[(t - 1) * 3].toLowerCase()} – ${F.MESES_CURTOS[(t - 1) * 3 + 2].toLowerCase()}`, pp.year === today.y && Math.ceil(today.m / 3) === t)).join('')}</div>`;
+    } else {
+      grid = `<div class="pp-grid pp-years">${years.slice().reverse().map((y) => {
+        const n = F.dataMonths.filter((m) => m.startsWith(String(y)) && m <= F.lastMonth).length;
+        return cell({ kind: 'year', year: y }, String(y), n ? `${n} ${n === 1 ? 'mês' : 'meses'}` : 'sem dados', y === today.y);
+      }).join('')}</div>`;
+    }
+    const yi = years.indexOf(pp.year);
+    return `<div class="pp-pop" role="dialog" aria-label="Escolher período">
+      <div class="seg pp-kinds">${[['month', 'Mês'], ['quarter', 'Trimestre'], ['year', 'Ano']].map(([k, l]) => `<button data-pp-kind="${k}" aria-pressed="${pp.kind === k}">${l}</button>`).join('')}</div>
+      ${pp.kind === 'year' ? '' : `<div class="pp-year">
+        <button class="pp-nav" data-pp-year="-1" aria-label="Ano anterior"${yi > 0 ? '' : ' disabled'}>‹</button>
+        <span class="pp-year-n">${pp.year}</span>
+        <button class="pp-nav" data-pp-year="1" aria-label="Próximo ano"${yi >= 0 && yi < years.length - 1 ? '' : ' disabled'}>›</button>
+      </div>`}
+      ${grid}
+      <div class="pp-foot">
+        <span class="label"><i class="pp-now-dot"></i>Atual</span>
+        <button class="btn btn-quiet btn-sm" data-pp-today>Ir para o atual</button>
+      </div>
+    </div>`;
+  }
+
+  /** Abre/fecha o painel; ao abrir, começa no tipo e ano do período em uso. */
+  function togglePicker(open) {
+    pp.open = open;
+    if (open) { pp.kind = state.period.kind; pp.year = state.period.year; }
+    redrawPicker(open);
+  }
+
+  /** Redesenha só o seletor (sem re-renderizar a página). */
+  function redrawPicker(focusSel) {
+    const ps = document.getElementById('period-slot');
+    if (!ps || !ps.firstElementChild) return;
+    ps.innerHTML = periodSelector();
+    if (pp.open && focusSel) {
+      const el = ps.querySelector('.pp-cell[aria-pressed="true"]') || ps.querySelector('.pp-cell:not([disabled])');
+      if (el) el.focus();
+    }
+  }
+
+  /** Período "atual" do tipo pedido (mês/trimestre/ano corrente da planilha). */
+  function currentOf(kind) {
+    const y = Number(F.lastMonth.slice(0, 4)), m = Number(F.lastMonth.slice(5));
+    return kind === 'month' ? { kind, year: y, month: m } : kind === 'quarter' ? { kind, year: y, quarter: Math.ceil(m / 3) } : { kind, year: y };
   }
 
   /* ------------------------------------------------------------------ */
@@ -262,19 +343,47 @@
   /* Eventos globais                                                     */
   /* ------------------------------------------------------------------ */
   document.addEventListener('click', (e) => {
-    const k = e.target.closest('[data-kind]');
-    if (k && k.closest('#period-slot')) { switchKind(k.dataset.kind); return; }
+    // Seletor de período (o painel é redesenhado a cada ação, então tudo é delegado aqui)
+    const slot = e.target.closest('#period-slot');
+    if (slot) {
+      const t = (sel) => e.target.closest(sel);
+      if (t('#pp-trigger')) { togglePicker(!pp.open); return; }
+      const st = t('[data-pp-step]');
+      if (st) { const q = stepPeriod(state.period, Number(st.dataset.ppStep)); if (q) setPeriod(q); return; }
+      const kd = t('[data-pp-kind]');
+      if (kd) {
+        pp.kind = kd.dataset.ppKind;
+        // Ao trocar de aba, garante que o ano navegado exista na planilha
+        const ys = dataYears(); if (!ys.includes(pp.year)) pp.year = ys[ys.length - 1];
+        redrawPicker(false); slot.querySelector(`[data-pp-kind="${pp.kind}"]`).focus(); return;
+      }
+      const yr = t('[data-pp-year]');
+      if (yr) { pp.year += Number(yr.dataset.ppYear); redrawPicker(false); const b = slot.querySelector(`[data-pp-year="${yr.dataset.ppYear}"]`); if (b && !b.disabled) b.focus(); return; }
+      const pk = t('[data-pp-pick]');
+      if (pk) { const q = F.parsePeriodKey(pk.dataset.ppPick); if (q) setPeriod(q); document.getElementById('pp-trigger')?.focus(); return; }
+      if (t('[data-pp-today]')) { setPeriod(currentOf(pp.kind)); return; }
+      return;
+    }
+    if (pp.open) togglePicker(false); // clique fora fecha o painel
     if (e.target.closest('#sync')) { reload(true); return; }
     // Elementos não-link clicáveis (cards, barras, donut) navegam via data-nav
     const nav = e.target.closest('[data-nav]');
     if (nav && !e.target.closest('a, button:not([data-nav])')) { location.hash = nav.dataset.nav; }
   });
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && pp.open) { togglePicker(false); document.getElementById('pp-trigger')?.focus(); return; }
+    // Setas movem o foco entre as células do painel (grade de 3, 2 ou 1 coluna)
+    if (pp.open && e.target.classList && e.target.classList.contains('pp-cell') && /^Arrow/.test(e.key)) {
+      const cells = [...document.querySelectorAll('#period-slot .pp-cell')];
+      const cols = getComputedStyle(e.target.parentElement).gridTemplateColumns.split(' ').length;
+      const d = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -cols, ArrowDown: cols }[e.key];
+      let i = cells.indexOf(e.target) + d;
+      while (cells[i] && cells[i].disabled) i += Math.sign(d);
+      if (cells[i]) { e.preventDefault(); cells[i].focus(); }
+      return;
+    }
     const nav = e.target.closest && e.target.closest('[data-nav]');
     if (nav && (e.key === 'Enter' || e.key === ' ') && e.target === nav) { e.preventDefault(); location.hash = nav.dataset.nav; }
-  });
-  document.addEventListener('change', (e) => {
-    if (e.target.id === 'period-select') { const p = F.parsePeriodKey(e.target.value); if (p) setPeriod(p); }
   });
   document.getElementById('menu-btn').addEventListener('click', () => {
     document.querySelector('.sidebar').classList.contains('open') ? closeSidebar() : openSidebar();

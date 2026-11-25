@@ -72,26 +72,46 @@
   }
 
   /**
-   * Valor em destaque no período: o mês selecionado ou o último mês preenchido
-   * do trimestre/ano. Traz também o mês anterior preenchido, para a variação.
+   * Meses que entram na média em destaque: o ano do período, de janeiro até o
+   * fim do período escolhido (o ano inteiro quando o período é "Ano").
+   * Assim, Q2/2026 mostra a média jan–jun e o ano mostra a média do ano.
+   * @param {Period} p
+   * @returns {string[]} "AAAA-MM"
    */
-  function valueAt(block, row, focus) {
-    const vals = untilNow(block, row.values);
-    let i = -1;
-    focus.forEach((m) => { const k = block.months.indexOf(m); if (k >= 0 && vals[k] !== null) i = k; });
-    if (i < 0) return null;
-    let j = i - 1;
-    while (j >= 0 && vals[j] === null) j--;
-    return { v: vals[i], prev: j >= 0 ? vals[j] : null, month: block.months[i], prevMonth: j >= 0 ? block.months[j] : null };
+  function avgMonths(p) {
+    const all = viewMonths({ kind: 'year', year: p.year }).chart;
+    const end = p.kind === 'year' ? all[11] : F.periodMonths(p).slice(-1)[0];
+    return all.filter((m) => m <= end);
   }
 
-  /** Texto da variação contra o mês anterior preenchido, na unidade do indicador. */
-  function deltaKind(row, l) {
-    if (!l || l.prev === null) return '';
-    const d = l.v - l.prev;
-    if (Math.abs(d) < 1e-9) return '<span class="delta text-fog">= mês anterior</span>';
-    const txt = row.kind === 'pct' ? `${F.pct(Math.abs(d)).replace('%', '')} p.p.` : U.fmtKind(row.kind, Math.abs(d));
-    return `<span class="delta"><b>${d > 0 ? '↑' : '↓'} ${esc(txt)}</b> vs. ${esc(F.MESES[Number(l.prevMonth.slice(5)) - 1])}</span>`;
+  /**
+   * Média mensal de uma linha nos meses preenchidos (meses vazios não contam).
+   * Percentuais usam a média simples dos meses, como na leitura mensal da planilha.
+   * @returns {{v:number, n:number, from:string, to:string, last:{v:number, month:string}}|null}
+   * @example average(bloco, manchete, avgMonths(p)) // → { v: 0.403, n: 9, from: '2026-01', to: '2026-09', ... }
+   */
+  function average(block, row, months) {
+    const vals = pick(block, row, months);
+    const filled = months.map((m, i) => [m, vals[i]]).filter(([, v]) => v !== null && Number.isFinite(v));
+    if (!filled.length) return null;
+    const [lastM, lastV] = filled[filled.length - 1];
+    return { v: filled.reduce((s, [, v]) => s + v, 0) / filled.length, n: filled.length, from: filled[0][0], to: lastM, last: { v: lastV, month: lastM } };
+  }
+
+  /** "Média de 2026 · jan–out (10 meses)" — deixa claro quais meses entraram na conta. */
+  function avgLabel(a) {
+    const mc = (m) => F.MESES_CURTOS[Number(m.slice(5)) - 1].toLowerCase();
+    const y = a.from.slice(0, 4);
+    return a.n === 1 ? `Média de ${y} · só ${mc(a.from)} preenchido` : `Média de ${y} · ${mc(a.from)}–${mc(a.to)} (${a.n} meses)`;
+  }
+
+  /** Linha de apoio sob a média: último mês preenchido e se ficou acima/abaixo da média. */
+  function lastVsAvg(row, a) {
+    if (!a) return '<span class="delta text-fog">Sem valor preenchido no ano</span>';
+    if (a.n === 1) return `<span class="delta text-fog">${esc(F.monthLabel(a.last.month))}</span>`;
+    const d = a.last.v - a.v;
+    const pos = Math.abs(d) < 1e-9 ? 'na média' : d > 0 ? '↑ acima da média' : '↓ abaixo da média';
+    return `<span class="delta">Último · ${esc(F.MESES[Number(a.last.month.slice(5)) - 1])}: <b>${esc(U.fmtKind(row.kind, a.last.v))}</b> <span class="text-fog">${pos}</span></span>`;
   }
 
   /** Séries do gráfico: a manchete primeiro (Cyan Signal) e as linhas da mesma unidade, até 4. */
@@ -108,14 +128,30 @@
     return [b.meta && `<span class="chip">Meta ${esc(b.meta)}</span>`, b.progress && `<span class="chip">Progresso ${esc(b.progress)}</span>`, h.total && `<span class="chip">Total ${esc(h.total)}</span>`].filter(Boolean).join('');
   }
 
-  /** Tabela de valores do bloco nos meses indicados (meses do período em destaque). */
-  function dataTable(b, months, focus) {
-    return `<div class="table-wrap"><table class="t ind-table" style="min-width:${Math.max(420, 160 + months.length * 96)}px">
-      <thead><tr><th>Linha</th>${months.map((m) => `<th class="r${focus.includes(m) ? ' is-focus' : ''}">${F.MESES_CURTOS[Number(m.slice(5)) - 1]}</th>`).join('')}<th class="r">Total</th></tr></thead>
+  /**
+   * Tabela de valores do bloco nos meses indicados (meses do período em destaque),
+   * com a coluna "Média" calculada sobre `avgMs` (mesma conta do número em destaque).
+   */
+  function dataTable(b, months, focus, avgMs) {
+    return `<div class="table-wrap"><table class="t ind-table" style="min-width:${Math.max(420, 260 + months.length * 96)}px">
+      <thead><tr><th>Linha</th>${months.map((m) => `<th class="r${focus.includes(m) ? ' is-focus' : ''}">${F.MESES_CURTOS[Number(m.slice(5)) - 1]}</th>`).join('')}<th class="r is-avg">Média</th><th class="r">Total</th></tr></thead>
       <tbody>${b.rows.map((r) => {
         const vals = pick(b, r, months);
-        return `<tr><td class="strong">${esc(r.label)}</td>${vals.map((v, i) => `<td class="r${focus.includes(months[i]) ? ' is-focus' : ''}">${esc(U.fmtKind(r.kind, v))}</td>`).join('')}<td class="r">${esc(r.total || '—')}</td></tr>`;
+        const a = average(b, r, avgMs);
+        return `<tr><td class="strong">${esc(r.label)}</td>${vals.map((v, i) => `<td class="r${focus.includes(months[i]) ? ' is-focus' : ''}">${esc(U.fmtKind(r.kind, v))}</td>`).join('')}<td class="r is-avg">${esc(a ? U.fmtKind(r.kind, a.v) : '—')}</td><td class="r">${esc(r.total || '—')}</td></tr>`;
       }).join('')}</tbody></table></div>`;
+  }
+
+  /** Agrupa blocos pelo tema definido em config.indicadores.grupos (ordem preservada). */
+  function byTheme(blocks) {
+    const out = [];
+    blocks.forEach((b) => {
+      const t = b.theme || 'Outros indicadores';
+      let g = out.find((x) => x.name === t);
+      if (!g) out.push(g = { name: t, blocks: [] });
+      g.blocks.push(b);
+    });
+    return out;
   }
 
   /** Seletor "ver indicador sozinho", agrupado pela ordem da planilha. */
@@ -151,9 +187,19 @@
    */
   function selectionBar(ind, sel) {
     const all = !sel.length;
+    const groups = byTheme(ind.blocks);
     return `<div class="ind-select" role="group" aria-label="Indicadores exibidos">
-      <button class="toggle" data-sel-all aria-pressed="${all}">Todos</button>
-      ${ind.blocks.map((b) => `<button class="toggle" data-sel="${b.id}" aria-pressed="${sel.includes(b.id)}">${esc(b.title)}</button>`).join('')}
+      <div class="ind-select-top">
+        <button class="toggle toggle-all" data-sel-all aria-pressed="${all}">Todos</button>
+        <span class="label">${all ? `${ind.blocks.length} indicadores` : `${sel.length} de ${ind.blocks.length} selecionados`} · clique para combinar</span>
+      </div>
+      <div class="ind-groups">${groups.map((g, gi) => {
+        const on = g.blocks.every((b) => sel.includes(b.id));
+        return `<div class="ind-group">
+          <button class="ind-group-name label" data-sel-group="${gi}" aria-pressed="${on}" title="Selecionar o grupo inteiro">${esc(g.name)} <span>${g.blocks.length}</span></button>
+          <div class="ind-group-chips">${g.blocks.map((b) => `<button class="toggle" data-sel="${b.id}" aria-pressed="${sel.includes(b.id)}">${esc(b.title)}</button>`).join('')}</div>
+        </div>`;
+      }).join('')}</div>
     </div>`;
   }
 
@@ -177,9 +223,10 @@
     const shown = sel.length ? ind.blocks.filter((b) => sel.includes(b.id)) : ind.blocks;
 
     const vm = viewMonths(p);
+    const am = avgMonths(p);
     const hasData = ind.blocks.some((b) => vm.chart.some((m) => b.months.includes(m)));
     const head = pageHead(`Indicadores / ${F.periodShort(p)}`, 'Indicadores financeiros',
-      `Painel de Bordo · aba Operações. ${p.kind === 'month' ? `Valores de ${esc(F.periodLabel(p).toLowerCase())}, com o trimestre como contexto.` : `Valores de ${esc(F.periodRange(p))} de ${p.year}.`}`,
+      `Painel de Bordo · aba Operações. Em destaque, a média mensal de ${p.year}${p.kind === 'year' ? '' : ` até ${esc(F.MESES[Number(am[am.length - 1].slice(5)) - 1])}`}; o gráfico mostra ${p.kind === 'year' ? 'o ano' : esc(F.periodRange(p))}.`,
       openSheet);
 
     // Faixa de destaque: indicadores mais executivos (ordem de preferência)
@@ -190,37 +237,40 @@
 
     const strip = picked.map((b) => {
       const h = headline(b);
-      const l = valueAt(b, h, vm.focus);
+      const a = average(b, h, am);
       return `<a class="cell ind-kpi" href="#/indicadores/${b.id}">
         <span class="label">${esc(b.title)}</span>
-        <div class="value num">${l ? esc(U.fmtKind(h.kind, l.v)) : '—'}</div>
-        <div class="hint">${l ? esc(F.monthLabel(l.month)) : 'Sem valor no período'}</div>
+        <div class="value num">${a ? esc(U.fmtKind(h.kind, a.v)) : '—'}</div>
+        <div class="hint">${a ? esc(avgLabel(a)) : 'Sem valor no ano'}</div>
       </a>`;
     }).join('');
 
-    const cards = shown.map((b) => {
+    const card = (b) => {
       const h = headline(b);
-      const l = valueAt(b, h, vm.focus);
+      const a = average(b, h, am);
       const plotted = plottedOf(b, h, vm.chart);
       const chips = chipsOf(b, h);
       return `<article class="panel ind-card" id="ind-${b.id}" data-block="${b.id}">
         <div class="panel-head" style="margin-bottom:16px">
-          <div>${b.group || b.note ? `<span class="label">${esc(b.group || b.note)}</span>` : ''}<h2 class="h2" style="margin-top:8px"><a href="#/indicadores/${b.id}" class="ind-title">${esc(b.title)}</a></h2></div>
+          <div>${b.group ? `<span class="label">${esc(b.group)}</span>` : ''}<h2 class="h2"${b.group ? ' style="margin-top:8px"' : ''}><a href="#/indicadores/${b.id}" class="ind-title">${esc(b.title)}</a></h2></div>
         </div>
         <div class="ind-head">
-          <div><span class="label">${esc(h.label)}${l ? ` · ${esc(F.monthLabel(l.month))}` : ''}</span>
-            <div class="display num ind-value">${l ? esc(U.fmtKind(h.kind, l.v)) : '—'}</div>
-            ${l ? deltaKind(h, l) : '<span class="delta text-fog">Sem valor preenchido no período</span>'}</div>
+          <div><span class="label">${esc(h.label)} · ${a ? esc(avgLabel(a)) : `média de ${p.year}`}</span>
+            <div class="display num ind-value">${a ? esc(U.fmtKind(h.kind, a.v)) : '—'}</div>
+            ${lastVsAvg(h, a)}</div>
           ${chips ? `<div class="ind-chips">${chips}</div>` : ''}
         </div>
-        ${U.seriesChart(vm.chart, plotted, h.kind)}
-        <div class="legend" style="margin-top:4px">${plotted.map((s, k) => `<span><i class="line" style="background:${U.SERIES_COLORS[k]}"></i>${esc(s.name)}</span>`).join('')}</div>
+        ${U.seriesChart(vm.chart, plotted, h.kind, { avg: a ? a.v : null })}
+        <div class="legend" style="margin-top:4px">${plotted.map((s, k) => `<span><i class="line" style="background:${U.SERIES_COLORS[k]}"></i>${esc(s.name)}</span>`).join('')}${a ? '<span><i class="dash avg"></i>Média</span>' : ''}</div>
         <div class="ind-foot">
-          <details class="ind-details"><summary class="btn btn-quiet btn-sm">Ver dados</summary>${dataTable(b, vm.chart, vm.focus)}</details>
+          <details class="ind-details"><summary class="btn btn-quiet btn-sm">Ver dados</summary>${dataTable(b, vm.chart, vm.focus, am)}</details>
           <a class="btn btn-ghost btn-sm" href="#/indicadores/${b.id}">Ver sozinho <span class="arr">→</span></a>
         </div>
       </article>`;
-    }).join('');
+    };
+    // Cards separados por tema; com um só tema visível o título do grupo é dispensável
+    const themes = byTheme(shown);
+    const cards = themes.map((g) => `${themes.length > 1 ? `<h2 class="ind-theme label">${esc(g.name)}</h2>` : ''}${g.blocks.map(card).join('')}`).join('');
 
     const html = `${head}
       ${st.ind === 'cache' ? `<div class="pending-int" style="margin:-24px 0 32px">Sem acesso à planilha agora — exibindo a cópia lida em ${esc(stamp(st.indCachedAt))}.</div>` : ''}
@@ -239,11 +289,18 @@
           const k = btn.dataset.sel;
           go(sel.includes(k) ? sel.filter((x) => x !== k) : [...sel, k]);
         }));
+        // Nome do grupo: marca o grupo inteiro ou, se já estiver todo marcado, desmarca
+        const groups = byTheme(ind.blocks);
+        view.querySelectorAll('[data-sel-group]').forEach((btn) => btn.addEventListener('click', () => {
+          const ids = groups[Number(btn.dataset.selGroup)].blocks.map((b) => b.id);
+          const on = ids.every((x) => sel.includes(x));
+          go(on ? sel.filter((x) => !ids.includes(x)) : [...sel, ...ids.filter((x) => !sel.includes(x))]);
+        }));
         if (!hasData) return;
         shown.forEach((b) => {
-          const card = view.querySelector(`[data-block="${b.id}"]`);
+          const el = view.querySelector(`[data-block="${b.id}"]`);
           const h = headline(b);
-          U.mountSeries(card, vm.chart, plottedOf(b, h, vm.chart), h.kind, b.rows.map((r) => ({ ...r, values: pick(b, r, vm.chart) })));
+          U.mountSeries(el, vm.chart, plottedOf(b, h, vm.chart), h.kind, b.rows.map((r) => ({ ...r, values: pick(b, r, vm.chart) })));
         });
       },
     };
@@ -262,7 +319,8 @@
     const b = ind.blocks[idx];
     const h = headline(b);
     const vm = viewMonths(p);
-    const l = valueAt(b, h, vm.focus);
+    const am = avgMonths(p);
+    const a = average(b, h, am);
     const kinds = [...new Set([h.kind, ...b.rows.map((r) => r.kind)])];
     const KIND_LABEL = { money: 'R$', pct: '%', num: 'Nº' };
     ctx.state.indView = ctx.state.indView || {};
@@ -276,12 +334,12 @@
       ${pageHead(`Indicador / ${F.periodShort(p)}`, esc(b.title), b.group ? `Parte de ${esc(b.group)} · Painel de Bordo` : 'Painel de Bordo · aba Operações', `${indicatorPicker(ind, id)}${openSheet}`)}
       <section class="hero" aria-label="${esc(b.title)}">
         <div class="hero-main">
-          <div class="hero-foot"><span class="label label-strong">${esc(h.label)}</span><span class="label">${l ? esc(F.monthLabel(l.month)) : esc(F.periodLabel(p))}</span></div>
-          <div class="hero-figure"><span class="display num" style="font-size:clamp(56px,7vw,96px)">${l ? esc(U.fmtKind(h.kind, l.v)) : '—'}</span></div>
-          <div class="hero-foot">${l ? deltaKind(h, l) : '<span class="delta text-fog">Sem valor preenchido no período selecionado</span>'}</div>
+          <div class="hero-foot"><span class="label label-strong">${esc(h.label)}</span><span class="label">${a ? esc(avgLabel(a)) : `Média de ${p.year}`}</span></div>
+          <div class="hero-figure"><span class="display num" style="font-size:clamp(56px,7vw,96px)">${a ? esc(U.fmtKind(h.kind, a.v)) : '—'}</span></div>
+          <div class="hero-foot">${lastVsAvg(h, a)}</div>
         </div>
         <div class="stats">
-          ${b.rows.filter((r) => r !== h).slice(0, 4).map((r) => { const v = valueAt(b, r, vm.focus); return `<div class="stat"><div><span class="label">${esc(r.label)}</span><div class="hint">${v ? esc(F.monthLabel(v.month)) : '—'}</div></div><span class="value num" style="font-size:24px">${v ? esc(U.fmtKind(r.kind, v.v)) : '—'}</span></div>`; }).join('')}
+          ${b.rows.filter((r) => r !== h).slice(0, 4).map((r) => { const v = average(b, r, am); return `<div class="stat"><div><span class="label">${esc(r.label)}</span><div class="hint">${v ? 'Média mensal' : '—'}</div></div><span class="value num" style="font-size:24px">${v ? esc(U.fmtKind(r.kind, v.v)) : '—'}</span></div>`; }).join('')}
           ${b.meta || b.progress ? `<div class="stat"><div><span class="label">Meta</span><div class="hint">${b.progress ? `Progresso ${esc(b.progress)}` : 'Definida na planilha'}</div></div><span class="value" style="font-size:20px">${esc(b.meta || '—')}</span></div>` : ''}
         </div>
       </section>
@@ -299,7 +357,7 @@
 
       <section class="section">
         ${sectionHead('Valores', p.kind === 'year' ? `Todos os meses de ${p.year}` : `${esc(F.periodLabel(p))} em destaque`)}
-        ${dataTable(b, yearMonths, vm.focus)}
+        ${dataTable(b, yearMonths, vm.focus, am)}
       </section>
 
       <nav class="ind-nav">
@@ -311,8 +369,10 @@
     function drawChart(view) {
       const plotted = plottedOf(b, h, yearMonths, vs.kind, vs.hidden);
       const box = view.querySelector('#ind-chart');
+      // Linha de média só quando o gráfico está na unidade da manchete e ela está visível
+      const showAvg = a && vs.kind === h.kind && !vs.hidden.has(h.label);
       box.innerHTML = plotted.length
-        ? `${U.seriesChart(yearMonths, plotted, vs.kind)}<div class="legend" style="margin-top:4px">${plotted.map((s, k) => `<span><i class="line" style="background:${U.SERIES_COLORS[k]}"></i>${esc(s.name)}</span>`).join('')}</div>`
+        ? `${U.seriesChart(yearMonths, plotted, vs.kind, { avg: showAvg ? a.v : null })}<div class="legend" style="margin-top:4px">${plotted.map((s, k) => `<span><i class="line" style="background:${U.SERIES_COLORS[k]}"></i>${esc(s.name)}</span>`).join('')}${showAvg ? '<span><i class="dash avg"></i>Média</span>' : ''}</div>`
         : '<div class="empty">Selecione ao menos uma série.</div>';
       if (plotted.length) U.mountSeries(box, yearMonths, plotted, vs.kind, b.rows.map((r) => ({ ...r, values: pick(b, r, yearMonths) })));
     }
