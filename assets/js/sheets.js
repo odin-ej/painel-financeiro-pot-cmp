@@ -452,6 +452,8 @@
     let indicators = null;
     if (indText) {
       indicators = parseIndicators(indText, C.indicadores.marcador);
+      const hide = (C.indicadores.ocultar || []).map(norm);
+      indicators.blocks = indicators.blocks.filter((b) => !hide.includes(norm(b.title)));
       data.incomes = Object.entries(indicators.entradas).map(([month, amount]) => ({ month, amount }));
     }
     const analyses = await fetchAnalyses();

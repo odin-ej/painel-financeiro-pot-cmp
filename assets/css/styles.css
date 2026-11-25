@@ -906,3 +906,12 @@ a.insight:hover { background: rgba(63, 64, 65, 0.25); }
 .toggle[aria-pressed='true'] { color: var(--cloud); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.22); }
 .ind-nav { display: flex; justify-content: space-between; gap: var(--s12); margin-top: var(--s60); flex-wrap: wrap; }
 .page-head .section-tools .field .select { max-width: 280px; text-overflow: ellipsis; }
+
+/* Seleção múltipla de indicadores */
+.ind-select { display: flex; flex-wrap: wrap; gap: 6px; margin: calc(-1 * var(--s16)) 0 var(--s40); }
+.ind-select [data-sel-all] { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.ind-strip.n1 { grid-template-columns: 1fr; }
+.ind-strip.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ind-strip.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ind-grid.single { grid-template-columns: 1fr; }
+@media (max-width: 760px) { .ind-strip.n3 { grid-template-columns: 1fr 1fr; } }

@@ -23,6 +23,8 @@ window.PAINEL_CONFIG = {
     spreadsheetId: '19av-VN8iBAKNJzYpcLMziq_kLOjuy_yRUYYZnFI9Lr0',
     gid: '230818536',
     marcador: 'Outros Indicadores',
+    /** Blocos da aba que não aparecem no painel (comparação pelo título, sem acento/maiúsculas). */
+    ocultar: ['Iniciativas Inovadoras'],
     url: 'https://docs.google.com/spreadsheets/d/19av-VN8iBAKNJzYpcLMziq_kLOjuy_yRUYYZnFI9Lr0/edit?gid=230818536',
   },
 

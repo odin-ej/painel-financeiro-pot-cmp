@@ -145,7 +145,19 @@
     if (r) r.addEventListener('click', () => window.App.reload(true));
   }
 
-  function indicatorsPage(ctx, id) {
+  /**
+   * Barra de seleção múltipla: cada indicador é um botão liga/desliga.
+   * A seleção vai para a URL (?sel=id1,id2) para poder ser compartilhada.
+   */
+  function selectionBar(ind, sel) {
+    const all = !sel.length;
+    return `<div class="ind-select" role="group" aria-label="Indicadores exibidos">
+      <button class="toggle" data-sel-all aria-pressed="${all}">Todos</button>
+      ${ind.blocks.map((b) => `<button class="toggle" data-sel="${b.id}" aria-pressed="${sel.includes(b.id)}">${esc(b.title)}</button>`).join('')}
+    </div>`;
+  }
+
+  function indicatorsPage(ctx, id, query = {}) {
     const sync = window.App.sync;
     const ind = sync.indicators;
     const st = sync.status || {};
@@ -158,17 +170,23 @@
     }
     if (id) return indicatorDetail(ctx, ind, id, openSheet);
 
+    // Seleção: URL tem prioridade; sem ela, mantém a última escolha da sessão
+    const valid = new Set(ind.blocks.map((b) => b.id));
+    if (query.sel !== undefined) ctx.state.indSel = String(query.sel).split(',').filter((x) => valid.has(x));
+    const sel = (ctx.state.indSel || []).filter((x) => valid.has(x));
+    const shown = sel.length ? ind.blocks.filter((b) => sel.includes(b.id)) : ind.blocks;
+
     const vm = viewMonths(p);
     const hasData = ind.blocks.some((b) => vm.chart.some((m) => b.months.includes(m)));
     const head = pageHead(`Indicadores / ${F.periodShort(p)}`, 'Indicadores financeiros',
       `Painel de Bordo · aba Operações. ${p.kind === 'month' ? `Valores de ${esc(F.periodLabel(p).toLowerCase())}, com o trimestre como contexto.` : `Valores de ${esc(F.periodRange(p))} de ${p.year}.`}`,
-      `${indicatorPicker(ind)}${openSheet}`);
+      openSheet);
 
     // Faixa de destaque: indicadores mais executivos (ordem de preferência)
     const PREF = [/resultado de caixa/i, /cash runway/i, /conversao de receitas|conversão de receitas/i, /rigidez/i];
     const picked = [];
-    PREF.forEach((re) => { const b = ind.blocks.find((x) => re.test(x.title) && !picked.includes(x)); if (b && picked.length < 4) picked.push(b); });
-    ind.blocks.forEach((b) => { if (picked.length < 4 && !picked.includes(b)) picked.push(b); });
+    PREF.forEach((re) => { const b = shown.find((x) => re.test(x.title) && !picked.includes(x)); if (b && picked.length < 4) picked.push(b); });
+    shown.forEach((b) => { if (picked.length < 4 && !picked.includes(b)) picked.push(b); });
 
     const strip = picked.map((b) => {
       const h = headline(b);
@@ -180,7 +198,7 @@
       </a>`;
     }).join('');
 
-    const cards = ind.blocks.map((b) => {
+    const cards = shown.map((b) => {
       const h = headline(b);
       const l = valueAt(b, h, vm.focus);
       const plotted = plottedOf(b, h, vm.chart);
@@ -206,16 +224,23 @@
 
     const html = `${head}
       ${st.ind === 'cache' ? `<div class="pending-int" style="margin:-24px 0 32px">Sem acesso à planilha agora — exibindo a cópia lida em ${esc(stamp(st.indCachedAt))}.</div>` : ''}
-      ${hasData ? `<div class="stat-strip ind-strip" style="margin-bottom:var(--s48)">${strip}</div><div class="ind-grid">${cards}</div>`
+      ${selectionBar(ind, sel)}
+      ${hasData ? `<div class="stat-strip ind-strip${picked.length < 4 ? ' n' + picked.length : ''}" style="margin-bottom:var(--s48)">${strip}</div><div class="ind-grid${shown.length === 1 ? ' single' : ''}">${cards}</div>`
         : `<div class="panel notice"><span class="label">Sem dados</span><p class="body-sm" style="margin-top:8px">A aba de indicadores não tem valores para ${esc(F.periodLabel(p))}. Selecione um período de ${esc([...new Set(ind.blocks[0].months.map((m) => m.slice(0, 4)))].join(', '))}.</p></div>`}
-      <p class="label" style="margin-top:var(--s40)">${ind.blocks.length} indicadores lidos abaixo de “${esc(CFG.indicadores.marcador)}” · atualizado ${esc(stamp(st.loadedAt))}</p>`;
+      <p class="label" style="margin-top:var(--s40)">${sel.length ? `${shown.length} de ` : ''}${ind.blocks.length} indicadores lidos abaixo de “${esc(CFG.indicadores.marcador)}” · atualizado ${esc(stamp(st.loadedAt))}</p>`;
 
     return {
       title: 'Indicadores', crumbs: [['Indicadores']], html,
       mount(view) {
         mountPicker(view);
+        const go = (ids) => { ctx.state.indSel = ids; location.hash = ids.length ? `#/indicadores?sel=${ids.join(',')}` : '#/indicadores?sel='; };
+        view.querySelector('[data-sel-all]').addEventListener('click', () => go([]));
+        view.querySelectorAll('[data-sel]').forEach((btn) => btn.addEventListener('click', () => {
+          const k = btn.dataset.sel;
+          go(sel.includes(k) ? sel.filter((x) => x !== k) : [...sel, k]);
+        }));
         if (!hasData) return;
-        ind.blocks.forEach((b) => {
+        shown.forEach((b) => {
           const card = view.querySelector(`[data-block="${b.id}"]`);
           const h = headline(b);
           U.mountSeries(card, vm.chart, plottedOf(b, h, vm.chart), h.kind, b.rows.map((r) => ({ ...r, values: pick(b, r, vm.chart) })));
